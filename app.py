@@ -61,11 +61,22 @@ def set_config(key, value):
         conn.commit()
 
 def get_api_keys_pool():
+    # 1. Проверяем облачный сейф Secrets
+    try:
+        if hasattr(st, "secrets") and "GEMINI_API_KEYS" in st.secrets:
+            raw_secrets = st.secrets["GEMINI_API_KEYS"]
+            keys = [k.strip() for k in raw_secrets.split("\n") if k.strip() and len(k.strip()) > 15]
+            if keys:
+                return keys
+    except Exception:
+        pass
+
+    # 2. Если сейфа нет, берем из базы
     raw = get_config("api_keys_pool", "")
     if not raw.strip():
         single = get_config("gemini_api_key", "")
         return [single.strip()] if single.strip() else []
-    return [k.strip() for k in raw.split("\n") if k.strip()]
+    return [k.strip() for k in raw.split("\n") if k.strip() and len(k.strip()) > 15]
 
 def save_api_keys_pool(keys_list):
     raw = "\n".join([k.strip() for k in keys_list if k.strip()])
