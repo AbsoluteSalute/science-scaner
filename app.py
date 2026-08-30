@@ -125,12 +125,12 @@ SCIENCE_DATABASE = {
     "🌌 Астрофизика и Космос": {
         "🔭 Nature Astronomy": "https://www.nature.com/natastron.rss",
         "🌌 Космос и Вселенная (Phys.org)": "https://phys.org/rss-feed/space-news/",
-        "📜 arXiv: Астрофизика (24/7 API)": "https://export.arxiv.org/api/query?search_query=cat:astro-ph&sortBy=submittedDate&sortOrder=descending&max_results=10",
+        "📜 arXiv: Астрофизика (24/7 API)": "https://export.arxiv.org/api/query?search_query=cat:astro-ph*&sortBy=lastUpdatedDate&sortOrder=descending&max_results=10",
         "🚀 NASA News": "https://www.nasa.gov/news-release/feed/"
     },
     "⚛️ Физика и Кванты": {
         "🔬 Nature Physics": "https://www.nature.com/nphys.rss",
-        "📜 arXiv: Квантовая физика (24/7 API)": "https://export.arxiv.org/api/query?search_query=cat:quant-ph&sortBy=submittedDate&sortOrder=descending&max_results=10",
+        "📜 arXiv: Квантовая физика (24/7 API)": "https://export.arxiv.org/api/query?search_query=cat:quant-ph*&sortBy=lastUpdatedDate&sortOrder=descending&max_results=10",
         "⚡ Физика конденсированного состояния (Phys.org)": "https://phys.org/rss-feed/physics-news/"
     },
     "🧬 Биология, Мозг и Медицина": {
@@ -145,7 +145,7 @@ SCIENCE_DATABASE = {
     },
     "🤖 Роботы и AI": {
         "🏛️ MIT Research News": "https://news.mit.edu/rss/topic/research",
-        "📜 arXiv: AI и Компьютерные науки (24/7 API)": "https://export.arxiv.org/api/query?search_query=cat:cs.AI&sortBy=submittedDate&sortOrder=descending&max_results=10"
+        "📜 arXiv: AI и Компьютерные науки (24/7 API)": "https://export.arxiv.org/api/query?search_query=cat:cs.AI*&sortBy=lastUpdatedDate&sortOrder=descending&max_results=10",
     },
     "🛡️ Защищенные журналы (Science, Cell, PRL)": {
         "🏆 Science Magazine (AAAS)": "https://www.science.org/rss/news_current.xml",
