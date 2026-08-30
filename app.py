@@ -17,7 +17,6 @@ st.set_page_config(page_title="iXBT Mega Sci-Radar Pro", page_icon="🔬", layou
 # 🔒 ЗАЩИТА ПАРОЛЕМ С ЗАПОМИНАНИЕМ НА УСТРОЙСТВЕ
 # ==========================================
 DEFAULT_PWD = st.secrets.get("APP_PASSWORD", "ruby2026")
-
 saved_auth = st.query_params.get("auth")
 
 if "authenticated" not in st.session_state:
@@ -43,7 +42,7 @@ if not st.session_state["authenticated"]:
     st.stop()
 
 # ==========================================
-# РАБОТА С GOOGLE ТАБЛИЦЕЙ И БАЗОЙ
+# GOOGLE ТАБЛИЦА И НАСТРОЙКИ
 # ==========================================
 DB_PATH = "radar_history.db"
 GSHEETS_URL = st.secrets.get("GSHEETS_URL", "")
@@ -55,9 +54,7 @@ SSL_CTX.verify_mode = ssl.CERT_NONE
 HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36'}
 
 def sync_to_gsheets(items):
-    """Отправляет новые статьи в Google Таблицу на Google Диске"""
-    if not GSHEETS_URL:
-        return
+    if not GSHEETS_URL: return
     try:
         data_json = json.dumps(items).encode('utf-8')
         req = urllib.request.Request(GSHEETS_URL, data=data_json, headers={'Content-Type': 'application/json'})
@@ -66,9 +63,7 @@ def sync_to_gsheets(items):
         pass
 
 def fetch_from_gsheets():
-    """Загружает всю историю из Google Таблицы"""
-    if not GSHEETS_URL:
-        return []
+    if not GSHEETS_URL: return []
     try:
         req = urllib.request.Request(GSHEETS_URL, headers=HEADERS)
         with urllib.request.urlopen(req, timeout=8) as resp:
@@ -108,44 +103,58 @@ def get_radar_keys():
     return []
 
 # ==========================================
-# БАЗА НАУЧНЫХ ЖУРНАЛОВ
+# ПОЛНАЯ БАЗА НАУЧНЫХ ЖУРНАЛОВ (9 КАТЕГОРИЙ)
 # ==========================================
 SCIENCE_DATABASE = {
-    "🏛️ Топ-журналы": {
-        "🏆 Nature": "https://www.nature.com/nature.rss",
+    "🏛️ Топ-журналы (Nature & Пресс-релизы)": {
+        "🏆 Nature (Главные исследования)": "https://www.nature.com/nature.rss",
         "🏆 Nature Communications": "https://www.nature.com/ncomms.rss",
         "🌐 Scientific Reports": "https://www.nature.com/srep.rss",
-        "📢 EurekAlert!": "https://www.eurekalert.org/rss/technology_engineering.xml"
+        "📢 EurekAlert! Science News": "https://www.eurekalert.org/rss/technology_engineering.xml"
     },
-    "🦖 Динозавры и Палеонтология": {
-        "🦖 Динозавры (Phys.org)": "https://phys.org/rss-feed/earth-news/archaeology-fossils/",
-        "🦴 Окаменелости (ScienceDaily)": "https://www.sciencedaily.com/rss/plants_animals/fossils.xml",
-        "🌿 Nature Ecology": "https://www.nature.com/natecolevol.rss"
+    "🦖 Динозавры, Палеонтология и Древности": {
+        "🦖 Динозавры и Окаменелости (Phys.org)": "https://phys.org/rss-feed/earth-news/archaeology-fossils/",
+        "🦴 Окаменелости и Эволюция (ScienceDaily)": "https://www.sciencedaily.com/rss/plants_animals/fossils.xml",
+        "🌿 Nature Ecology & Evolution": "https://www.nature.com/natecolevol.rss"
     },
-    "🌋 Геология и Земля": {
+    "🌋 Геология, Недра, Вулканы и Океаны": {
         "🌍 Nature Geoscience": "https://www.nature.com/ngeo.rss",
-        "🌋 Геология (Phys.org)": "https://phys.org/rss-feed/earth-news/",
-        "🌊 Науки о Земле (ScienceDaily)": "https://www.sciencedaily.com/rss/earth_climate/earth_science.xml"
+        "🌋 Геология и Земля (Phys.org)": "https://phys.org/rss-feed/earth-news/",
+        "🌊 Науки о Земле и Климате (ScienceDaily)": "https://www.sciencedaily.com/rss/earth_climate/earth_science.xml"
     },
     "🌌 Астрофизика и Космос": {
         "🔭 Nature Astronomy": "https://www.nature.com/natastron.rss",
-        "🌌 Космос (Phys.org)": "https://phys.org/rss-feed/space-news/",
-        "📜 arXiv: Астрофизика": "http://export.arxiv.org/rss/astro-ph",
+        "🌌 Космос и Вселенная (Phys.org)": "https://phys.org/rss-feed/space-news/",
+        "📜 arXiv: Астрофизика (astro-ph)": "http://export.arxiv.org/rss/astro-ph",
         "🚀 NASA News": "https://www.nasa.gov/news-release/feed/"
     },
     "⚛️ Физика и Кванты": {
         "🔬 Nature Physics": "https://www.nature.com/nphys.rss",
-        "📜 arXiv: Квантовая физика": "http://export.arxiv.org/rss/quant-ph",
-        "⚡ Физика (Phys.org)": "https://phys.org/rss-feed/physics-news/"
+        "📜 arXiv: Квантовая физика (quant-ph)": "http://export.arxiv.org/rss/quant-ph",
+        "⚡ Физика конденсированного состояния (Phys.org)": "https://phys.org/rss-feed/physics-news/"
     },
-    "🧬 Биология и Мозг": {
+    "🧬 Биология, Мозг и Медицина": {
         "🧬 Nature Biotechnology": "https://www.nature.com/nbt.rss",
         "🧠 Nature Neuroscience": "https://www.nature.com/neuro.rss",
         "💊 The Lancet": "https://www.thelancet.com/rssfeed/lancet_current.xml"
     },
+    "⚡ Новые материалы и Энергия": {
+        "🔋 Nature Energy": "https://www.nature.com/nenergy.rss",
+        "🧪 Nature Chemistry": "https://www.nature.com/nchem.rss",
+        "⚡ Материаловедение (Phys.org)": "https://phys.org/rss-feed/materials-science/"
+    },
     "🤖 Роботы и AI": {
         "🏛️ MIT Research News": "https://news.mit.edu/rss/topic/research",
-        "📜 arXiv: AI": "http://export.arxiv.org/rss/cs.AI"
+        "📜 arXiv: AI и Компьютерные науки": "http://export.arxiv.org/rss/cs.AI"
+    },
+    "🛡️ Защищенные журналы (Science, Cell, PRL)": {
+        "🏆 Science Magazine (AAAS)": "https://www.science.org/rss/news_current.xml",
+        "🏆 Science Advances (AAAS)": "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=sciadv",
+        "⚛️ Physical Review Letters (PRL)": "https://feeds.aps.org/rss/recent/prl.xml",
+        "⚛️ Physical Review X (PRX)": "https://feeds.aps.org/rss/recent/prx.xml",
+        "🧬 Cell (Cell Press)": "https://www.cell.com/cell/rss",
+        "🧠 Neuron (Cell Press)": "https://www.cell.com/neuron/rss",
+        "🤖 Science Robotics (AAAS)": "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=scirobotics"
     }
 }
 
@@ -154,7 +163,7 @@ BATCH_SYSTEM_PROMPT = """
 [
   {
     "id": 1, "score": 8, "score_reason": "причина оценки",
-    "category": "Космос/Динозавры/Кванты/Геология/Биология/AI",
+    "category": "Космос/Динозавры/Кванты/Геология/Биология/AI/Материалы",
     "ru_tldr": "суть открытия в 2 предложениях",
     "titles": ["Заголовок 1", "Заголовок 2", "Заголовок 3"],
     "hook_angle": "главный парадокс для споров",
@@ -165,16 +174,23 @@ BATCH_SYSTEM_PROMPT = """
 
 def fetch_single_feed(feed_name, feed_url, items_per_feed):
     articles = []
+    status = "ok"
+    err = ""
     try:
         req = urllib.request.Request(feed_url, headers=HEADERS)
         with urllib.request.urlopen(req, context=SSL_CTX, timeout=5) as response:
             parsed = feedparser.parse(response.read())
-            for entry in parsed.entries[:items_per_feed]:
-                summary = re.sub(r'<[^>]+>', '', entry.get("summary", entry.get("description", ""))).strip()
-                articles.append({"source": feed_name, "title": entry.get("title", ""), "summary": summary[:1200], "link": entry.get("link", "")})
-    except:
-        pass
-    return articles
+            if not parsed.entries:
+                status = "empty"
+                err = "Лента пуста"
+            else:
+                for entry in parsed.entries[:items_per_feed]:
+                    summary = re.sub(r'<[^>]+>', '', entry.get("summary", entry.get("description", ""))).strip()
+                    articles.append({"source": feed_name, "title": entry.get("title", ""), "summary": summary[:1200], "link": entry.get("link", "")})
+    except Exception as e:
+        status = "error"
+        err = str(e)
+    return {"name": feed_name, "status": status, "error": err, "articles": articles}
 
 def clean_json(text):
     text = re.sub(r'^```json\s*|\s*```$', '', text.strip(), flags=re.IGNORECASE)
@@ -220,7 +236,34 @@ def generate_html_report(results, report_title="Sci-Radar Report"):
     return f"<!DOCTYPE html><html><head><meta charset='UTF-8'><title>{report_title}</title></head><body style='background:#0f172a; font-family:sans-serif; padding:24px;'><div style='max-width:1000px; margin:0 auto;'><h1 style='color:#38bdf8;'>🔭 {report_title} | {date_str}</h1>{cards}</div></body></html>"
 
 # ==========================================
-# САЙДБАР (МОДЕЛЬ 3.6 ПО УМОЛЧАНИЮ)
+# СИНХРОНИЗАЦИЯ ЧЕКБОКСОВ В САЙДБАРЕ
+# ==========================================
+def toggle_category(cat_name):
+    val = st.session_state[f"master_{cat_name}"]
+    for feed_name in SCIENCE_DATABASE[cat_name]:
+        st.session_state[f"chk_{feed_name}"] = val
+
+def select_all_feeds():
+    for cat_name, feeds in SCIENCE_DATABASE.items():
+        st.session_state[f"master_{cat_name}"] = True
+        for feed_name in feeds:
+            st.session_state[f"chk_{feed_name}"] = True
+
+def deselect_all_feeds():
+    for cat_name, feeds in SCIENCE_DATABASE.items():
+        st.session_state[f"master_{cat_name}"] = False
+        for feed_name in feeds:
+            st.session_state[f"chk_{feed_name}"] = False
+
+for cat_name, feeds in SCIENCE_DATABASE.items():
+    if f"master_{cat_name}" not in st.session_state:
+        st.session_state[f"master_{cat_name}"] = ("🛡️" not in cat_name)
+    for feed_name in feeds:
+        if f"chk_{feed_name}" not in st.session_state:
+            st.session_state[f"chk_{feed_name}"] = st.session_state[f"master_{cat_name}"]
+
+# ==========================================
+# САЙДБАР (ПОЛНОЕ МЕНЮ)
 # ==========================================
 radar_keys = get_radar_keys()
 
@@ -233,9 +276,43 @@ with st.sidebar:
     else:
         st.info("ℹ️ Google Таблица не настроена в Secrets")
         
-    # ВЫБОР МОДЕЛИ: gemini-3.6-flash СТОИТ ПЕРВОЙ ПО УМОЛЧАНИЮ
     selected_model = st.selectbox("🤖 Модель:", ["gemini-3.6-flash", "gemini-2.0-flash", "gemini-1.5-flash"], index=0)
-    items_per_feed = st.slider("Статей с журнала", 1, 5, 2)
+
+    st.markdown("---")
+    st.markdown("### 📚 Выбор направлений науки")
+    
+    # Кнопки быстрого выбора
+    c_all, c_none = st.columns(2)
+    with c_all:
+        st.button("✨ Выбрать всё", on_click=select_all_feeds, use_container_width=True)
+    with c_none:
+        st.button("🧹 Снять всё", on_click=deselect_all_feeds, use_container_width=True)
+        
+    # Категории с галочками
+    for cat_name, feeds in SCIENCE_DATABASE.items():
+        is_protected = "🛡️" in cat_name
+        with st.expander(f"{cat_name} ({len(feeds)})", expanded=False):
+            if is_protected:
+                st.warning("⚠️ Защищены Cloudflare (HTTP 403).")
+            st.checkbox(
+                "✅ Выбрать все в этом разделе", 
+                key=f"master_{cat_name}", 
+                on_change=toggle_category, 
+                args=(cat_name,)
+            )
+            for feed_name in feeds:
+                st.checkbox(feed_name, key=f"chk_{feed_name}")
+
+    active_feed_dict = {}
+    for cat_name, feeds in SCIENCE_DATABASE.items():
+        for feed_name, url in feeds.items():
+            if st.session_state.get(f"chk_{feed_name}", False):
+                active_feed_dict[feed_name] = url
+
+    st.info(f"🎯 **Выбрано журналов:** `{len(active_feed_dict)}`")
+    
+    st.markdown("---")
+    items_per_feed = st.slider("Статей с каждого журнала", 1, 5, 2)
     min_score = st.slider("Показывать от оценки", 1, 10, 6)
     
     st.markdown("---")
@@ -244,28 +321,43 @@ with st.sidebar:
         st.query_params.clear()
         st.rerun()
 
+# ==========================================
+# ОСНОВНОЙ ЭКРАН
+# ==========================================
 tab_live, tab_history = st.tabs(["🔭 Свежий Радар", "📊 Вечный архив (Google Таблица)"])
 
 with tab_live:
     st.title("🔭 Свежий Sci-Radar")
-    st.caption("Поиск свежих открытий ➔ Анализ через Gemini ➔ Сохранение в Google Таблицу")
+    st.caption("Поиск свежих открытий ➔ Анализ через Gemini 3.6 Flash ➔ Сохранение в Google Таблицу")
 
     if not radar_keys:
         st.warning("⚠️ Добавьте ключи в `Secrets` приложения!")
         st.stop()
 
+    if not active_feed_dict:
+        st.info("Выберите хотя бы один научный журнал в меню слева.")
+        st.stop()
+
     if st.button("🚀 Сканировать свежую науку", type="primary"):
         all_articles = []
-        with st.spinner("Опрос 20+ мировых журналов..."):
-            feeds = [url for cat in SCIENCE_DATABASE.values() for url in cat.values()]
-            feed_names = [name for cat in SCIENCE_DATABASE.values() for name in cat.keys()]
+        feed_reports = []
+        
+        with st.spinner("Опрос выбранных научных журналов..."):
             with ThreadPoolExecutor(max_workers=15) as ex:
-                futures = [ex.submit(fetch_single_feed, name, url, items_per_feed) for name, url in zip(feed_names, feeds)]
+                futures = [ex.submit(fetch_single_feed, name, active_feed_dict[name], items_per_feed) for name in active_feed_dict.keys()]
                 for f in as_completed(futures):
-                    all_articles.extend(f.result())
+                    res = f.result()
+                    feed_reports.append(res)
+                    if res["status"] == "ok":
+                        all_articles.extend(res["articles"])
         
         seen = set()
         unique = [x for x in all_articles if x["link"] not in seen and not seen.add(x["link"])]
+        
+        ok_feeds = [f for f in feed_reports if f["status"] == "ok"]
+        failed_feeds = [f for f in feed_reports if f["status"] != "ok"]
+        
+        st.session_state["feed_diag"] = {"ok": ok_feeds, "failed": failed_feeds}
         
         if not unique:
             st.warning("Все свежие статьи уже обработаны!")
@@ -286,10 +378,18 @@ with tab_live:
                 
             sorted_res = sorted(results, key=lambda x: x.get("score", 0), reverse=True)
             st.session_state["latest_results"] = sorted_res
-            
-            # Сохраняем в вечную Google Таблицу
             sync_to_gsheets(sorted_res)
             st.success(f"Готово! Обработано {len(sorted_res)} тем и записано в Google Таблицу.")
+
+    if "feed_diag" in st.session_state:
+        diag = st.session_state["feed_diag"]
+        with st.expander(f"📊 Статус опроса источников: Успешно ({len(diag['ok'])}) | Проблемных ({len(diag['failed'])})", expanded=False):
+            if diag["failed"]:
+                st.error("Следующие журналы не ответили:")
+                for f in diag["failed"]:
+                    st.markdown(f"- **{f['name']}** ➔ `{f['error']}`")
+            st.success(f"Успешно ответили ({len(diag['ok'])} журналов):")
+            st.markdown(" • ".join([f"**{f['name']}** ({len(f['articles'])} новых)" for f in diag["ok"]]))
 
     if "latest_results" in st.session_state:
         filtered = [r for r in st.session_state["latest_results"] if r.get("score", 0) >= min_score]
@@ -305,7 +405,7 @@ with tab_live:
         for res in filtered:
             sc = res.get('score', 0)
             icon = "🔥" if sc >= 8 else "💡"
-            with st.expander(f"{icon} [{sc}/10] [{res.get('category')}] {res.get('titles', [''])[0]} targets"):
+            with st.expander(f"{icon} [{sc}/10] [{res.get('category')}] {res.get('titles', [''])[0]}"):
                 st.markdown(f"**Суть открытия:** {res.get('ru_tldr')}")
                 st.markdown(f"**Парадокс:** {res.get('hook_angle')}")
                 st.markdown(f"[🔗 Источник исследования]({res.get('link')})")
