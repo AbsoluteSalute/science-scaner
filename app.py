@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 st.set_page_config(page_title="iXBT Mega Sci-Radar Pro", page_icon="🔬", layout="wide")
 
 # ==========================================
-# 🔒 ЗАЩИТА ПАРОЛЕМ С ЗАПОМИНАНИЕМ НА УСТРОЙСТВЕ
+# 🔒 ЗАЩИТА ПАРОЛЕМ
 # ==========================================
 DEFAULT_PWD = st.secrets.get("APP_PASSWORD", "ruby2026")
 saved_auth = st.query_params.get("auth")
@@ -103,7 +103,7 @@ def get_radar_keys():
     return []
 
 # ==========================================
-# ПОЛНАЯ БАЗА НАУЧНЫХ ЖУРНАЛОВ (9 КАТЕГОРИЙ)
+# ПОЛНАЯ БАЗА НАУЧНЫХ ЖУРНАЛОВ (С КРУГЛОСУТОЧНЫМ ARXIV API)
 # ==========================================
 SCIENCE_DATABASE = {
     "🏛️ Топ-журналы (Nature & Пресс-релизы)": {
@@ -125,12 +125,12 @@ SCIENCE_DATABASE = {
     "🌌 Астрофизика и Космос": {
         "🔭 Nature Astronomy": "https://www.nature.com/natastron.rss",
         "🌌 Космос и Вселенная (Phys.org)": "https://phys.org/rss-feed/space-news/",
-        "📜 arXiv: Астрофизика (astro-ph)": "http://export.arxiv.org/rss/astro-ph",
+        "📜 arXiv: Астрофизика (24/7 API)": "https://export.arxiv.org/api/query?search_query=cat:astro-ph&sortBy=submittedDate&sortOrder=descending&max_results=10",
         "🚀 NASA News": "https://www.nasa.gov/news-release/feed/"
     },
     "⚛️ Физика и Кванты": {
         "🔬 Nature Physics": "https://www.nature.com/nphys.rss",
-        "📜 arXiv: Квантовая физика (quant-ph)": "http://export.arxiv.org/rss/quant-ph",
+        "📜 arXiv: Квантовая физика (24/7 API)": "https://export.arxiv.org/api/query?search_query=cat:quant-ph&sortBy=submittedDate&sortOrder=descending&max_results=10",
         "⚡ Физика конденсированного состояния (Phys.org)": "https://phys.org/rss-feed/physics-news/"
     },
     "🧬 Биология, Мозг и Медицина": {
@@ -145,7 +145,7 @@ SCIENCE_DATABASE = {
     },
     "🤖 Роботы и AI": {
         "🏛️ MIT Research News": "https://news.mit.edu/rss/topic/research",
-        "📜 arXiv: AI и Компьютерные науки": "http://export.arxiv.org/rss/cs.AI"
+        "📜 arXiv: AI и Компьютерные науки (24/7 API)": "https://export.arxiv.org/api/query?search_query=cat:cs.AI&sortBy=submittedDate&sortOrder=descending&max_results=10"
     },
     "🛡️ Защищенные журналы (Science, Cell, PRL)": {
         "🏆 Science Magazine (AAAS)": "https://www.science.org/rss/news_current.xml",
@@ -178,15 +178,17 @@ def fetch_single_feed(feed_name, feed_url, items_per_feed):
     err = ""
     try:
         req = urllib.request.Request(feed_url, headers=HEADERS)
-        with urllib.request.urlopen(req, context=SSL_CTX, timeout=5) as response:
+        with urllib.request.urlopen(req, context=SSL_CTX, timeout=6) as response:
             parsed = feedparser.parse(response.read())
             if not parsed.entries:
                 status = "empty"
                 err = "Лента пуста"
             else:
                 for entry in parsed.entries[:items_per_feed]:
-                    summary = re.sub(r'<[^>]+>', '', entry.get("summary", entry.get("description", ""))).strip()
-                    articles.append({"source": feed_name, "title": entry.get("title", ""), "summary": summary[:1200], "link": entry.get("link", "")})
+                    title = entry.get("title", "").replace("\n", " ").strip()
+                    summary = re.sub(r'<[^>]+>', '', entry.get("summary", entry.get("description", ""))).replace("\n", " ").strip()
+                    link = entry.get("link", "")
+                    articles.append({"source": feed_name, "title": title, "summary": summary[:1200], "link": link})
     except Exception as e:
         status = "error"
         err = str(e)
@@ -236,7 +238,7 @@ def generate_html_report(results, report_title="Sci-Radar Report"):
     return f"<!DOCTYPE html><html><head><meta charset='UTF-8'><title>{report_title}</title></head><body style='background:#0f172a; font-family:sans-serif; padding:24px;'><div style='max-width:1000px; margin:0 auto;'><h1 style='color:#38bdf8;'>🔭 {report_title} | {date_str}</h1>{cards}</div></body></html>"
 
 # ==========================================
-# СИНХРОНИЗАЦИЯ ЧЕКБОКСОВ В САЙДБАРЕ
+# СИНХРОНИЗАЦИЯ ЧЕКБОКСОВ
 # ==========================================
 def toggle_category(cat_name):
     val = st.session_state[f"master_{cat_name}"]
@@ -263,7 +265,7 @@ for cat_name, feeds in SCIENCE_DATABASE.items():
             st.session_state[f"chk_{feed_name}"] = st.session_state[f"master_{cat_name}"]
 
 # ==========================================
-# САЙДБАР (ПОЛНОЕ МЕНЮ)
+# САЙДБАР
 # ==========================================
 radar_keys = get_radar_keys()
 
@@ -273,27 +275,23 @@ with st.sidebar:
         st.success(f"🔑 Ключей в Secrets: **{len(radar_keys)}**")
     if GSHEETS_URL:
         st.success("📊 Google Таблица: **Подключена**")
-    else:
-        st.info("ℹ️ Google Таблица не настроена в Secrets")
         
     selected_model = st.selectbox("🤖 Модель:", ["gemini-3.6-flash", "gemini-2.0-flash", "gemini-1.5-flash"], index=0)
 
     st.markdown("---")
     st.markdown("### 📚 Выбор направлений науки")
     
-    # Кнопки быстрого выбора
     c_all, c_none = st.columns(2)
     with c_all:
         st.button("✨ Выбрать всё", on_click=select_all_feeds, use_container_width=True)
     with c_none:
         st.button("🧹 Снять всё", on_click=deselect_all_feeds, use_container_width=True)
         
-    # Категории с галочками
     for cat_name, feeds in SCIENCE_DATABASE.items():
         is_protected = "🛡️" in cat_name
         with st.expander(f"{cat_name} ({len(feeds)})", expanded=False):
             if is_protected:
-                st.warning("⚠️ Защищены Cloudflare (HTTP 403).")
+                st.warning("⚠️ Защищены Cloudflare.")
             st.checkbox(
                 "✅ Выбрать все в этом разделе", 
                 key=f"master_{cat_name}", 
@@ -342,7 +340,7 @@ with tab_live:
         all_articles = []
         feed_reports = []
         
-        with st.spinner("Опрос выбранных научных журналов..."):
+        with st.spinner("Опрос выбранных научных журналов и arXiv API..."):
             with ThreadPoolExecutor(max_workers=15) as ex:
                 futures = [ex.submit(fetch_single_feed, name, active_feed_dict[name], items_per_feed) for name in active_feed_dict.keys()]
                 for f in as_completed(futures):
