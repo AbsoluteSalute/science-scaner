@@ -1,3 +1,6 @@
+import warnings
+warnings.filterwarnings('ignore')
+
 import streamlit as st
 import feedparser
 import google.generativeai as genai
@@ -11,10 +14,10 @@ import urllib.request
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-st.set_page_config(page_title="iXBT Mega Sci-Radar Pro", page_icon="🔬", layout="wide")
+st.set_page_config(page_title="iXBT Mega Sci-Studio Pro", page_icon="🔬", layout="wide")
 
 # ==========================================
-# 🔒 ЗАЩИТА ПАРОЛЕМ
+# 🔒 ЗАЩИТА ПАРОЛЕМ С ЗАПОМИНАНИЕМ НА УСТРОЙСТВЕ
 # ==========================================
 DEFAULT_PWD = st.secrets.get("APP_PASSWORD", "ruby2026")
 saved_auth = st.query_params.get("auth")
@@ -23,13 +26,13 @@ if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = (saved_auth == DEFAULT_PWD)
 
 if not st.session_state["authenticated"]:
-    st.title("🔒 Вход в Sci-Radar Pro")
+    st.title("🔒 Вход в Sci-Studio Pro")
     st.caption("Личный кабинет автора Ruby_Rougarou (iXBT Live)")
     
     pwd_input = st.text_input("Введите пароль доступа:", type="password")
     remember_me = st.checkbox("Запомнить меня на этом устройстве", value=True)
     
-    if st.button("Войти на радар", type="primary"):
+    if st.button("Войти в Студию", type="primary"):
         if pwd_input == DEFAULT_PWD:
             st.session_state["authenticated"] = True
             if remember_me:
@@ -42,16 +45,124 @@ if not st.session_state["authenticated"]:
     st.stop()
 
 # ==========================================
-# GOOGLE ТАБЛИЦА И НАСТРОЙКИ
+# КОНФИГУРАЦИЯ И СЕЙФ SECRETS (РАЗДЕЛЬНЫЕ ПУЛЫ)
 # ==========================================
 DB_PATH = "radar_history.db"
-GSHEETS_URL = st.secrets.get("GSHEETS_URL", "")
+PDF_DIR = "pdf_downloads"
+os.makedirs(PDF_DIR, exist_ok=True)
 
+GSHEETS_URL = st.secrets.get("GSHEETS_URL", "")
 SSL_CTX = ssl.create_default_context()
 SSL_CTX.check_hostname = False
 SSL_CTX.verify_mode = ssl.CERT_NONE
 
 HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36'}
+
+def get_radar_keys():
+    """Берет ключи строго для Радара"""
+    try:
+        if hasattr(st, "secrets"):
+            raw = st.secrets.get("RADAR_API_KEYS") or st.secrets.get("GEMINI_API_KEYS", "")
+            keys = [k.strip() for k in raw.split("\n") if k.strip() and len(k.strip()) > 15]
+            if keys: return keys
+    except:
+        pass
+    return []
+
+def get_farm_keys():
+    """Берет ключи строго для Контент-Фермы"""
+    try:
+        if hasattr(st, "secrets"):
+            raw = st.secrets.get("FARM_API_KEYS") or st.secrets.get("GEMINI_API_KEYS", "")
+            keys = [k.strip() for k in raw.split("\n") if k.strip() and len(k.strip()) > 15]
+            if keys: return keys
+    except:
+        pass
+    return []
+
+# ==========================================
+# ВАШИ 8 ПРОМПТОВ ДЛЯ ФЕРМЫ (ПОЛНАЯ ВЕРСИЯ)
+# ==========================================
+
+PROMPT_1_ROLE = """ROLE:
+You are a senior science and technology editor/journalist writing for top-tier intellectual publications (comparable to N+1, Wired, Popular Mechanics, Vox, New Scientist). Your native language is Russian.
+
+OBJECTIVE:
+Transform raw input (scientific papers, technical reports, news briefs, or general topics) into engaging, deeply analytical, and accessible long-read articles for a broad but intelligent audience.
+
+TONE & STYLE:
+1. Intelligent & Engaging: Write vividly and rhythmically. Avoid dry academic tone, but never dumb it down to a childish level. Respect the reader's intelligence.
+2. Analytical: Do not just describe *what* happened. Explain *how* it works, *why* it matters, and *what* the consequences are. Focus on the mechanics and the logic.
+3. Visual & Metaphorical: Use strong imagery and analogies to explain complex concepts (e.g., compare computer networks to fungal mycelium, or thermodynamic processes to piston engines).
+4. Rhythm: Alternating sentence lengths. Use short, punchy sentences for emphasis.
+
+EDITORIAL RULES (STRICT):
+- NO "Translationese": The Russian text must sound natural, not like a translated English text. Avoid calques.
+- NO Clichés: Ban phrases like "Time will tell," "Science does not stand still," "British scientists have proven."
+- NO Passive Voice Abuse: Use active verbs. Instead of "The experiment was conducted," use "Engineers conducted the experiment."
+- NO Fluff: Every sentence must carry new information or emotional weight. Cut introductory nonsense like "In today's world..."
+- Structure: Always use engaging Hooks (intros), meaningful Subheadings, and a thought-provoking Outro (not just a summary).
+
+PROCESS:
+1. Analyze the core conflict or breakthrough in the source material.
+2. Deconstruct the information and rebuild the narrative flow (Introduction -> The Problem -> The Solution/Mechanics -> Context/Impact -> Conclusion).
+3. Write the article in Russian, ensuring high-quality formatting (Markdown).
+
+BEHAVIOR:
+You are not a chatbot assisting a user; you are a writer crafting a piece. Do not use conversational fillers like "Here is your article." Just provide the Title and the Article content. Жди исходник"""
+
+PROMPT_2_REVIEWER = """***
+
+### Системный промт: «Научный обозреватель»
+
+**ТВОЯ РОЛЬ:**
+Ты — элитный научный журналист и аналитик, пишущий для ведущих интеллектуальных изданий (уровня N+1, Популярная Механика, Naked Science, TechCrunch, New Scientist). Твоя специализация — превращать сложные научные данные, сухие технические отчеты или академические статьи в захватывающие, глубокие и понятные лонгриды.
+
+**ЦЕЛЕВАЯ АУДИТОРИЯ:**
+Образованные люди, которым интересна наука и технологии, но которые не являются узкими специалистами в обсуждаемой теме. Они ценят уважение к своему интеллекту, отсутствие «воды» и качественный сторителлинг.
+
+**ТВОЙ СТИЛЬ И ТОН (Tone of Voice):**
+1.  **Интеллектуальный и увлекательный:** Пиши живо, но без дешевого заигрывания. Твой текст должен звучать авторитетно, но не занудно.
+2.  **Аналитический, а не описательный:** Не просто пересказывай «что произошло», а объясняй «как это работает», «почему это важно» и «что это меняет».
+3.  **Визуальный и метафоричный:** Используй сильные образы. Если речь о сложной физике — объясни понятными словами, запрещено использовать неуместные сравнения типо бильярдных шаров или натянутой ткани.
+4.  **Ритмичный:** Чередуй длину предложений. Запрещены неуместные фразы, не несущие в себе информации (Например: «Это не просто эволюция. Это слом парадигмы.»).
+
+**АЛГОРИТМ РАБОТЫ С ИСХОДНИКОМ:**
+1.  **Анализ:** Выдели главную идею (Core Idea). Что именно является прорывом, конфликтом или сутью новости?
+2.  **Деконструкция:** Забудь структуру исходного текста. Выстрой свое повествование заново.
+3.  **Синтез:** Напиши статью с нуля, используя факты из источника, но своими словами.
+
+**СТРУКТУРА СТАТЬИ:**
+1.  **Заход (Hook):** Никогда не начинай со слов «Ученые открыли...» или «В этой статье...». Начни с контекста, проблемы, парадокса или яркой сцены. Погрузи читателя в мир, где эта проблема существует.
+2.  **Суть (The "Meat"):** Объясни механику процесса. Как именно это работает? Избавься от лишнего академического шума, оставив кристально чистую логику. Используй подзаголовки, которые интригуют.
+3.  **Контекст и значение (The "So What?"):** Почему это важно именно сейчас? Как это повлияет на индустрию, общество или понимание мира?
+4.  **Заключение (Outro):** Не делай школьных выводов («Таким образом, это важно»). Заверши статью взглядом в будущее, философским вопросом или сильной финальной мыслью.
+
+**ЯЗЫКОВЫЕ ТРЕБОВАНИЯ:**
+*   **Запрет на канцелярит:** Избегай фраз вроде «осуществляет деятельность», «имеет место быть», «данная разработка». Заменяй их на глаголы действия.
+*   **Запрет на клише:** Не используй выражения «британские ученые доказали», «наука не стоит на месте», «будущее уже здесь» (если это не ирония).
+*   **Терминология:** Вводи сложные термины только если они необходимы, и тут же объясняй их простым языком.
+
+**ПРИМЕР МЫШЛЕНИЯ:**
+*   *Плохо:* «Исследователи разработали новый метод тактильной отдачи, использующий расширение газа».
+*   *Хорошо:* «Инженеры отказались от привычной электроники. Вместо моторов они заставили работать законы термодинамики: нагретый воздух сам создает рельеф под вашим пальцем».
+
+**ЗАДАЧА:**
+На основе предоставленного пользователем текста напиши статью на русском языке, следуя этим инструкциям. Тема может быть любой: от квантовой физики и IT до истории и биологии. Главное — сохранить глубину и увлекательность.
+
+***"""
+
+PROMPT_3_STRICT = "перепиши более строго, без сравнений. но так же понятно для массового читателя"
+PROMPT_4_LENGTH = "ты перегрузил сложными и никому непонятными словами. я просил без нелепых сравнений, а не текст для ученых. БЕЗ СРАВНЕНИЙ, строгий текст понятными словами. Не менее 8000 символов"
+PROMPT_5_FORMULAS = "формулы ломают разметку, а также замени длинные формулы на текстовые описания (статья для широкой аудитории). Остальной текст не меняй"
+PROMPT_6A_TITLES = "Придумай ряд интересных, информативных и кликабельных названий для этой статьи +они должно соответствовать критериям для попадания в google discover +они должны иметь наибольшую вероятность поисковой выдачи при случайном запросе в google"
+PROMPT_6B_TITLES_EDGE = "Более интересные для широкой аудитории и согласующиеся с текстом статьи. не кликбейтные, но \"на грани\""
+PROMPT_7_FIGURES = "какие изображения из исследования брать для моей статьи и где их размещать. изображения берем полностью а не отдельные панели"
+PROMPT_8_REVE = "придумай детальный и понятный для генератора промт для создания иллюстраций к этой статье. генерировать будет reve. Промты на английском, рядом перевод на русский. С фотореализмом"
+
+# ==========================================
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# ==========================================
 
 def sync_to_gsheets(items):
     if not GSHEETS_URL: return
@@ -92,29 +203,19 @@ def fetch_from_gsheets():
     except:
         return []
 
-def get_radar_keys():
-    try:
-        if hasattr(st, "secrets") and "GEMINI_API_KEYS" in st.secrets:
-            raw = st.secrets["GEMINI_API_KEYS"]
-            keys = [k.strip() for k in raw.split("\n") if k.strip() and len(k.strip()) > 15]
-            if keys: return keys
-    except:
-        pass
-    return []
-
 # ==========================================
-# ПОЛНАЯ БАЗА НАУЧНЫХ ЖУРНАЛОВ (С КРУГЛОСУТОЧНЫМ ARXIV API)
+# ПОЛНАЯ БАЗА НАУЧНЫХ ЖУРНАЛОВ
 # ==========================================
 SCIENCE_DATABASE = {
     "🏛️ Топ-журналы (Nature & Пресс-релизы)": {
-        "🏆 Nature (Главные исследования)": "https://www.nature.com/nature.rss",
+        "🏆 Nature": "https://www.nature.com/nature.rss",
         "🏆 Nature Communications": "https://www.nature.com/ncomms.rss",
         "🌐 Scientific Reports": "https://www.nature.com/srep.rss",
         "📢 EurekAlert! Science News": "https://www.eurekalert.org/rss/technology_engineering.xml"
     },
     "🦖 Динозавры, Палеонтология и Древности": {
-        "🦖 Динозавры и Окаменелости (Phys.org)": "https://phys.org/rss-feed/earth-news/archaeology-fossils/",
-        "🦴 Окаменелости и Эволюция (ScienceDaily)": "https://www.sciencedaily.com/rss/plants_animals/fossils.xml",
+        "🦖 Динозавры (Phys.org)": "https://phys.org/rss-feed/earth-news/archaeology-fossils/",
+        "🦴 Окаменелости (ScienceDaily)": "https://www.sciencedaily.com/rss/plants_animals/fossils.xml",
         "🌿 Nature Ecology & Evolution": "https://www.nature.com/natecolevol.rss"
     },
     "🌋 Геология, Недра, Вулканы и Океаны": {
@@ -145,7 +246,7 @@ SCIENCE_DATABASE = {
     },
     "🤖 Роботы и AI": {
         "🏛️ MIT Research News": "https://news.mit.edu/rss/topic/research",
-        "📜 arXiv: AI и Компьютерные науки (24/7 API)": "https://export.arxiv.org/api/query?search_query=cat:cs.AI*&sortBy=lastUpdatedDate&sortOrder=descending&max_results=10",
+        "📜 arXiv: AI и Компьютерные науки (24/7 API)": "https://export.arxiv.org/api/query?search_query=cat:cs.AI*&sortBy=lastUpdatedDate&sortOrder=descending&max_results=10"
     },
     "🛡️ Защищенные журналы (Science, Cell, PRL)": {
         "🏆 Science Magazine (AAAS)": "https://www.science.org/rss/news_current.xml",
@@ -174,25 +275,19 @@ BATCH_SYSTEM_PROMPT = """
 
 def fetch_single_feed(feed_name, feed_url, items_per_feed):
     articles = []
-    status = "ok"
-    err = ""
     try:
         req = urllib.request.Request(feed_url, headers=HEADERS)
         with urllib.request.urlopen(req, context=SSL_CTX, timeout=6) as response:
             parsed = feedparser.parse(response.read())
-            if not parsed.entries:
-                status = "empty"
-                err = "Лента пуста"
-            else:
+            if parsed.entries:
                 for entry in parsed.entries[:items_per_feed]:
                     title = entry.get("title", "").replace("\n", " ").strip()
                     summary = re.sub(r'<[^>]+>', '', entry.get("summary", entry.get("description", ""))).replace("\n", " ").strip()
                     link = entry.get("link", "")
                     articles.append({"source": feed_name, "title": title, "summary": summary[:1200], "link": link})
-    except Exception as e:
-        status = "error"
-        err = str(e)
-    return {"name": feed_name, "status": status, "error": err, "articles": articles}
+    except:
+        pass
+    return articles
 
 def clean_json(text):
     text = re.sub(r'^```json\s*|\s*```$', '', text.strip(), flags=re.IGNORECASE)
@@ -212,107 +307,130 @@ def analyze_batch(keys_pool, model_name, batch_items, start_key=0):
             continue
     return {"error": "Все ключи исчерпали квоту"}, start_key
 
-def generate_html_report(results, report_title="Sci-Radar Report"):
-    date_str = datetime.now().strftime("%d.%m.%Y %H:%M")
-    cards = ""
-    for r in results:
-        sc = r.get("score", 0)
-        col = "#10b981" if sc >= 8 else ("#f59e0b" if sc >= 6 else "#64748b")
-        t_items = "".join([f"<li style='margin-bottom:6px;'>{t}</li>" for t in r.get("titles", [])])
-        cards += f"""
-        <div style="background:#1e293b; border:1px solid #334155; border-radius:12px; padding:24px; margin-bottom:24px; color:#f8fafc;">
-            <div style="display:flex; gap:10px; align-items:center; margin-bottom:12px;">
-                <span style="background:#475569; padding:4px 10px; border-radius:6px; font-size:12px;">{r.get('category','Наука')}</span>
-                <span style="background:{col}; color:#fff; padding:4px 10px; border-radius:20px; font-weight:bold;">{sc}/10</span>
-                <span style="margin-left:auto; color:#94a3b8; font-size:13px;">{r.get('source')}</span>
-            </div>
-            <h2 style="color:#fff; font-size:20px;">{r.get('titles',[''])[0]}</h2>
-            <p><strong>💡 Суть:</strong> {r.get('ru_tldr')}</p>
-            <p><strong>🔥 Парадокс:</strong> {r.get('hook_angle')}</p>
-            <ul style="list-style:none; padding-left:0;">{t_items}</ul>
-            <div style="background:#090d16; padding:12px; border-radius:8px; border:1px dashed #334155; font-family:monospace; color:#38bdf8;">
-                🎨 {r.get('nano_banana_prompt')}
-            </div>
-            <p style="margin-top:14px; font-size:13px;"><a href="{r.get('link')}" target="_blank" style="color:#38bdf8;">🔗 Источник исследования &rarr;</a></p>
-        </div>"""
-    return f"<!DOCTYPE html><html><head><meta charset='UTF-8'><title>{report_title}</title></head><body style='background:#0f172a; font-family:sans-serif; padding:24px;'><div style='max-width:1000px; margin:0 auto;'><h1 style='color:#38bdf8;'>🔭 {report_title} | {date_str}</h1>{cards}</div></body></html>"
+def extract_doi_or_arxiv(url):
+    text = url.strip()
+    m = re.search(r'arxiv\.org/(?:abs|pdf)/(\d{4}\.\d{4,5})', text)
+    if m: return {"type": "arxiv", "id": m.group(1)}
+    nature_m = re.search(r'/articles/([a-z0-9\-]+)', text)
+    if nature_m: return {"type": "doi", "id": f"10.1038/{nature_m.group(1)}"}
+    doi_m = re.search(r'10\.\d{4,9}/[-._;()/:A-Za-z0-9]+', text)
+    if doi_m: return {"type": "doi", "id": doi_m.group(0).rstrip('.')}
+    return None
+
+def fetch_web_article_text(url):
+    try:
+        req = urllib.request.Request(url, headers=HEADERS)
+        with urllib.request.urlopen(req, context=SSL_CTX, timeout=8) as resp:
+            raw_html = resp.read().decode('utf-8', errors='ignore')
+            paragraphs = re.findall(r'<p[^>]*>(.*?)</p>', raw_html, re.DOTALL)
+            clean_ps = []
+            for p in paragraphs:
+                txt = re.sub(r'<[^>]+>', '', p).strip()
+                if len(txt) > 40 and not any(x in txt.lower() for x in ['cookie', 'subscribe', 'privacy', 'terms']):
+                    clean_ps.append(txt)
+            doi_match = re.search(r'10\.\d{4,9}/[-._;()/:A-Za-z0-9]+', raw_html)
+            doi_found = doi_match.group(0).rstrip('.') if doi_match else None
+            return "\n\n".join(clean_ps), doi_found
+    except:
+        return "", None
+
+def find_pdf_file(doi_or_arxiv_info):
+    if doi_or_arxiv_info["type"] == "arxiv":
+        aid = doi_or_arxiv_info["id"]
+        local_p = os.path.join(PDF_DIR, f"arxiv_{aid}.pdf")
+        if not os.path.exists(local_p):
+            try: urllib.request.urlretrieve(f"https://arxiv.org/pdf/{aid}.pdf", local_p)
+            except: pass
+        if os.path.exists(local_p): return local_p
+
+    doi = doi_or_arxiv_info["id"]
+    local_p = os.path.join(PDF_DIR, doi.replace('/', '_') + ".pdf")
+    if os.path.exists(local_p): return local_p
+
+    try:
+        req = urllib.request.Request(f"https://api.unpaywall.org/v2/{doi}?email=farm@ixbt.com", headers=HEADERS)
+        with urllib.request.urlopen(req, context=SSL_CTX, timeout=5) as resp:
+            data = json.loads(resp.read().decode())
+            pdf_u = data.get("best_oa_location", {}).get("url_for_pdf")
+            if pdf_u:
+                urllib.request.urlretrieve(pdf_u, local_p)
+                if os.path.exists(local_p): return local_p
+    except: pass
+    return None
+
+def get_paper_payload(url, fallback_title="", fallback_summary=""):
+    target = extract_doi_or_arxiv(url)
+    if target:
+        pdf_path = find_pdf_file(target)
+        if pdf_path and os.path.exists(pdf_path):
+            with open(pdf_path, "rb") as f:
+                pdf_bytes = f.read()
+            return {"mime_type": "application/pdf", "data": pdf_bytes}, f"Оригинальный PDF ({os.path.basename(pdf_path)})"
+
+    web_text, doi_found = fetch_web_article_text(url)
+    if doi_found:
+        pdf_path = find_pdf_file({"type": "doi", "id": doi_found})
+        if pdf_path and os.path.exists(pdf_path):
+            with open(pdf_path, "rb") as f:
+                pdf_bytes = f.read()
+            return {"mime_type": "application/pdf", "data": pdf_bytes}, f"Оригинальный PDF исследования ({os.path.basename(pdf_path)})"
+
+    if len(web_text) > 400:
+        return f"RESEARCH TITLE: {fallback_title}\n\nFULL IN-DEPTH REPORT / DATA:\n{web_text}", "Полный текст научного отчета"
+
+    return f"TITLE: {fallback_title}\n\nSUMMARY:\n{fallback_summary}\n\nURL: {url}", "Подробный научный контекст"
+
+def md_to_html(md):
+    h = re.sub(r'^###\s*(.*?)$', r'<h3>\1</h3>', md, flags=re.M)
+    h = re.sub(r'^##\s*(.*?)$', r'<h2>\1</h2>', h, flags=re.M)
+    h = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', h)
+    h = re.sub(r'^>\s*(.*?)$', r'<blockquote>\1</blockquote>', h, flags=re.M)
+    return "\n".join([f"<p>{p.strip()}</p>" if p.strip() and not p.strip().startswith('<h') and not p.strip().startswith('<blockquote') else p.strip() for p in h.split('\n\n') if p.strip()])
 
 # ==========================================
-# СИНХРОНИЗАЦИЯ ЧЕКБОКСОВ
-# ==========================================
-def toggle_category(cat_name):
-    val = st.session_state[f"master_{cat_name}"]
-    for feed_name in SCIENCE_DATABASE[cat_name]:
-        st.session_state[f"chk_{feed_name}"] = val
-
-def select_all_feeds():
-    for cat_name, feeds in SCIENCE_DATABASE.items():
-        st.session_state[f"master_{cat_name}"] = True
-        for feed_name in feeds:
-            st.session_state[f"chk_{feed_name}"] = True
-
-def deselect_all_feeds():
-    for cat_name, feeds in SCIENCE_DATABASE.items():
-        st.session_state[f"master_{cat_name}"] = False
-        for feed_name in feeds:
-            st.session_state[f"chk_{feed_name}"] = False
-
-for cat_name, feeds in SCIENCE_DATABASE.items():
-    if f"master_{cat_name}" not in st.session_state:
-        st.session_state[f"master_{cat_name}"] = ("🛡️" not in cat_name)
-    for feed_name in feeds:
-        if f"chk_{feed_name}" not in st.session_state:
-            st.session_state[f"chk_{feed_name}"] = st.session_state[f"master_{cat_name}"]
-
-# ==========================================
-# САЙДБАР
+# САЙДБАР (РАЗДЕЛЬНЫЕ СЧЕТЧИКИ КЛЮЧЕЙ)
 # ==========================================
 radar_keys = get_radar_keys()
+farm_keys = get_farm_keys()
 
 with st.sidebar:
     st.title("⚙️ Настройки")
-    if radar_keys:
-        st.success(f"🔑 Ключей в Secrets: **{len(radar_keys)}**")
+    st.success(f"📡 Ключей Радара: **{len(radar_keys)}**")
+    st.success(f"🏭 Ключей Фермы: **{len(farm_keys)}**")
     if GSHEETS_URL:
         st.success("📊 Google Таблица: **Подключена**")
-        
+    else:
+        st.info("ℹ️ Google Таблица не подключена")
+
     selected_model = st.selectbox("🤖 Модель:", ["gemini-3.6-flash", "gemini-2.0-flash", "gemini-1.5-flash"], index=0)
 
     st.markdown("---")
-    st.markdown("### 📚 Выбор направлений науки")
+    st.markdown("### 📚 Источники для сканирования")
     
     c_all, c_none = st.columns(2)
     with c_all:
-        st.button("✨ Выбрать всё", on_click=select_all_feeds, use_container_width=True)
+        if st.button("✨ Выбрать всё", use_container_width=True):
+            for cat in SCIENCE_DATABASE:
+                st.session_state[f"m_{cat}"] = True
+                for f_n in SCIENCE_DATABASE[cat]: st.session_state[f"chk_{f_n}"] = True
     with c_none:
-        st.button("🧹 Снять всё", on_click=deselect_all_feeds, use_container_width=True)
-        
-    for cat_name, feeds in SCIENCE_DATABASE.items():
-        is_protected = "🛡️" in cat_name
-        with st.expander(f"{cat_name} ({len(feeds)})", expanded=False):
-            if is_protected:
-                st.warning("⚠️ Защищены Cloudflare.")
-            st.checkbox(
-                "✅ Выбрать все в этом разделе", 
-                key=f"master_{cat_name}", 
-                on_change=toggle_category, 
-                args=(cat_name,)
-            )
-            for feed_name in feeds:
-                st.checkbox(feed_name, key=f"chk_{feed_name}")
+        if st.button("🧹 Снять всё", use_container_width=True):
+            for cat in SCIENCE_DATABASE:
+                st.session_state[f"m_{cat}"] = False
+                for f_n in SCIENCE_DATABASE[cat]: st.session_state[f"chk_{f_n}"] = False
 
-    active_feed_dict = {}
-    for cat_name, feeds in SCIENCE_DATABASE.items():
-        for feed_name, url in feeds.items():
-            if st.session_state.get(f"chk_{feed_name}", False):
-                active_feed_dict[feed_name] = url
+    active_feeds = {}
+    for cat, feeds in SCIENCE_DATABASE.items():
+        with st.expander(f"{cat} ({len(feeds)})", expanded=False):
+            m_val = st.checkbox("Выбрать все", value=("🛡️" not in cat), key=f"m_{cat}")
+            for f_n, f_url in feeds.items():
+                if st.checkbox(f_n, value=m_val, key=f"chk_{f_n}"):
+                    active_feeds[f_n] = f_url
 
-    st.info(f"🎯 **Выбрано журналов:** `{len(active_feed_dict)}`")
-    
-    st.markdown("---")
+    st.info(f"🎯 **Выбрано журналов:** `{len(active_feeds)}`")
     items_per_feed = st.slider("Статей с каждого журнала", 1, 5, 2)
     min_score = st.slider("Показывать от оценки", 1, 10, 6)
-    
+
     st.markdown("---")
     if st.button("🚪 Выйти из аккаунта"):
         st.session_state["authenticated"] = False
@@ -320,47 +438,36 @@ with st.sidebar:
         st.rerun()
 
 # ==========================================
-# ОСНОВНОЙ ЭКРАН
+# ОСНОВНЫЕ ВКЛАДКИ
 # ==========================================
-tab_live, tab_history = st.tabs(["🔭 Свежий Радар", "📊 Вечный архив (Google Таблица)"])
+tab_live, tab_farm, tab_history = st.tabs(["🔭 Свежий Радар", "🏭 Контент-Ферма", "📊 Вечный архив (Google Таблица)"])
 
+# ----------------- ВКЛАДКА 1: РАДАР (ИСПОЛЬЗУЕТ RADAR_API_KEYS) -----------------
 with tab_live:
     st.title("🔭 Свежий Sci-Radar")
     st.caption("Поиск свежих открытий ➔ Анализ через Gemini 3.6 Flash ➔ Сохранение в Google Таблицу")
 
     if not radar_keys:
-        st.warning("⚠️ Добавьте ключи в `Secrets` приложения!")
-        st.stop()
-
-    if not active_feed_dict:
-        st.info("Выберите хотя бы один научный журнал в меню слева.")
+        st.warning("⚠️ Добавьте ключи `RADAR_API_KEYS` в Secrets приложения!")
         st.stop()
 
     if st.button("🚀 Сканировать свежую науку", type="primary"):
         all_articles = []
-        feed_reports = []
-        
-        with st.spinner("Опрос выбранных научных журналов и arXiv API..."):
+        with st.spinner("Опрос выбранных научных журналов..."):
             with ThreadPoolExecutor(max_workers=15) as ex:
-                futures = [ex.submit(fetch_single_feed, name, active_feed_dict[name], items_per_feed) for name in active_feed_dict.keys()]
+                futures = [ex.submit(fetch_single_feed, name, active_feeds[name], items_per_feed) for name in active_feeds.keys()]
                 for f in as_completed(futures):
                     res = f.result()
-                    feed_reports.append(res)
                     if res["status"] == "ok":
                         all_articles.extend(res["articles"])
-        
+
         seen = set()
         unique = [x for x in all_articles if x["link"] not in seen and not seen.add(x["link"])]
-        
-        ok_feeds = [f for f in feed_reports if f["status"] == "ok"]
-        failed_feeds = [f for f in feed_reports if f["status"] != "ok"]
-        
-        st.session_state["feed_diag"] = {"ok": ok_feeds, "failed": failed_feeds}
-        
+
         if not unique:
             st.warning("Все свежие статьи уже обработаны!")
         else:
-            st.write(f"Найдено **{len(unique)}** новых статей. Анализируем через **{selected_model}**...")
+            st.write(f"Найдено **{len(unique)}** новых статей. Анализируем через **{selected_model}** (Ключи Радара)...")
             results, pbar, key_idx = [], st.progress(0), 0
             batches = [unique[i:i+5] for i in range(0, len(unique), 5)]
             for b_i, batch in enumerate(batches):
@@ -373,33 +480,14 @@ with tab_live:
                             results.append(item)
                 pbar.progress((b_i + 1) / len(batches))
                 time.sleep(1)
-                
+
             sorted_res = sorted(results, key=lambda x: x.get("score", 0), reverse=True)
             st.session_state["latest_results"] = sorted_res
             sync_to_gsheets(sorted_res)
             st.success(f"Готово! Обработано {len(sorted_res)} тем и записано в Google Таблицу.")
 
-    if "feed_diag" in st.session_state:
-        diag = st.session_state["feed_diag"]
-        with st.expander(f"📊 Статус опроса источников: Успешно ({len(diag['ok'])}) | Проблемных ({len(diag['failed'])})", expanded=False):
-            if diag["failed"]:
-                st.error("Следующие журналы не ответили:")
-                for f in diag["failed"]:
-                    st.markdown(f"- **{f['name']}** ➔ `{f['error']}`")
-            st.success(f"Успешно ответили ({len(diag['ok'])} журналов):")
-            st.markdown(" • ".join([f"**{f['name']}** ({len(f['articles'])} новых)" for f in diag["ok"]]))
-
     if "latest_results" in st.session_state:
         filtered = [r for r in st.session_state["latest_results"] if r.get("score", 0) >= min_score]
-        
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            st.subheader(f"Свежие находки (Оценка ≥ {min_score})")
-        with c2:
-            if filtered:
-                html_data = generate_html_report(filtered, "Свежий выпуск Sci-Radar")
-                st.download_button("📥 Скачать этот выпуск в HTML", data=html_data, file_name="fresh_radar.html", mime="text/html")
-                
         for res in filtered:
             sc = res.get('score', 0)
             icon = "🔥" if sc >= 8 else "💡"
@@ -408,23 +496,180 @@ with tab_live:
                 st.markdown(f"**Парадокс:** {res.get('hook_angle')}")
                 st.markdown(f"[🔗 Источник исследования]({res.get('link')})")
 
+# ----------------- ВКЛАДКА 2: ФЕРМА (ИСПОЛЬЗУЕТ FARM_API_KEYS) -----------------
+with tab_farm:
+    st.title("🏭 Облачная Контент-Ферма")
+    st.caption("Автоматическая 8-шаговая генерация лонгридов на Gemini 3.6 Flash (Выделенный пул ключей Фермы)")
+
+    if not farm_keys:
+        st.warning("⚠️ Добавьте выделенные ключи `FARM_API_KEYS` в Secrets приложения!")
+        st.stop()
+
+    farm_mode = st.radio(
+        "Выберите режим работы фермы:",
+        ["⚡ Автопилот (Взять Топ-1 тему из базы)", "🔗 Написать по моей ссылке"],
+        horizontal=True
+    )
+
+    target_url = ""
+    target_title = ""
+    target_summary = ""
+
+    if farm_mode == "⚡ Автопилот (Взять Топ-1 тему из базы)":
+        top_candidate = None
+        if "latest_results" in st.session_state and st.session_state["latest_results"]:
+            top_candidate = st.session_state["latest_results"][0]
+        else:
+            gs_items = fetch_from_gsheets()
+            if gs_items:
+                top_candidate = gs_items[0]
+
+        if top_candidate:
+            st.info(f"🎯 **Выбрана лучшая тема:** `[{top_candidate.get('score')}/10]` **{top_candidate.get('title')}**")
+            st.caption(f"Источник: {top_candidate.get('link')}")
+            target_url = top_candidate.get('link')
+            target_title = top_candidate.get('title')
+            target_summary = top_candidate.get('ru_tldr', '')
+        else:
+            st.warning("В базе пока нет тем. Сначала запустите сканирование во вкладке '🔭 Свежий Радар' или переключитесь на ручной ввод ссылки.")
+    else:
+        target_url = st.text_input("Вставьте ссылку на исследование (Nature, arXiv, DOI или новость СМИ):", placeholder="https://www.nature.com/articles/s41567-...")
+        target_title = "Научное исследование"
+        target_summary = ""
+
+    if st.button("🚀 Сгенерировать готовую статью", type="primary", disabled=(not target_url)):
+        st.markdown("---")
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+
+        # 1. Извлечение материала
+        status_text.write("🌐 **[0/8] Загружаем оригинальный PDF / материалы статьи...**")
+        payload, payload_type = get_paper_payload(target_url, target_title, target_summary)
+        progress_bar.progress(10)
+
+        # 2. Инициализация чата на выделенных ключах Фермы
+        genai.configure(api_key=farm_keys[0])
+        model = genai.GenerativeModel(selected_model, generation_config={"temperature": 0.25, "max_output_tokens": 8192})
+        chat = model.start_chat(history=[])
+
+        key_idx = 0
+        def safe_send(msg):
+            nonlocal key_idx, chat
+            for attempt in range(len(farm_keys) * 2):
+                try:
+                    return chat.send_message(msg)
+                except Exception as e:
+                    err = str(e)
+                    if "429" in err or "quota" in err.lower() or "resource" in err.lower():
+                        key_idx = (key_idx + 1) % len(farm_keys)
+                        saved_hist = list(chat.history)
+                        genai.configure(api_key=farm_keys[key_idx])
+                        m = genai.GenerativeModel(selected_model, generation_config={"temperature": 0.25, "max_output_tokens": 8192})
+                        chat = m.start_chat(history=saved_hist)
+                        time.sleep(2)
+                    else:
+                        raise e
+            raise Exception("Все ключи фермы исчерпаны")
+
+        try:
+            # Шаг 1: Роль
+            status_text.write("🔹 **[1/8] Отправка роли научного редактора...**")
+            safe_send(PROMPT_1_ROLE)
+            progress_bar.progress(25)
+            time.sleep(2)
+
+            # Шаг 2: Исходник + Черновик (ПОЛНЫЙ ПРОМПТ «НАУЧНЫЙ ОБОЗРЕВАТЕЛЬ»)
+            status_text.write("🔹 **[2/8] Черновик статьи (Научный обозреватель + фактура)...**")
+            safe_send([payload, PROMPT_2_REVIEWER])
+            progress_bar.progress(40)
+            time.sleep(2)
+
+            # Шаг 3: Строго без сравнений
+            status_text.write("🔹 **[3/8] Перепиши строго, без сравнений...**")
+            safe_send(PROMPT_3_STRICT)
+            progress_bar.progress(55)
+            time.sleep(2)
+
+            # Шаг 4: 8000+ знаков
+            status_text.write("🔹 **[4/8] Понятными словами, не менее 8000 знаков...**")
+            safe_send(PROMPT_4_LENGTH)
+            progress_bar.progress(70)
+            time.sleep(2)
+
+            # Шаг 5: Формулы
+            status_text.write("🔹 **[5/8] Зачистка формул и LaTeX-разметки...**")
+            r5 = safe_send(PROMPT_5_FORMULAS)
+            article_text = r5.text.strip()
+            progress_bar.progress(80)
+            time.sleep(2)
+
+            # Шаг 6: Заголовки Discover
+            status_text.write("🔹 **[6/8] Генерация заголовков Google Discover «на грани»...**")
+            safe_send(PROMPT_6A_TITLES)
+            time.sleep(1)
+            r6b = safe_send(PROMPT_6B_TITLES_EDGE)
+            final_titles = r6b.text.strip()
+            progress_bar.progress(90)
+            time.sleep(2)
+
+            # Шаг 7: Рисунки
+            status_text.write("🔹 **[7/8] Анализ оригинальных рисунков из исследования...**")
+            r7 = safe_send(PROMPT_7_FIGURES)
+            figures_placement = r7.text.strip()
+            time.sleep(2)
+
+            # Шаг 8: Промпты Reve
+            status_text.write("🔹 **[8/8] Промпты для генератора Reve (EN + RU, Фотореализм)...**")
+            r8 = safe_send(PROMPT_8_REVE)
+            reve_prompts = r8.text.strip()
+            progress_bar.progress(100)
+
+            status_text.success(f"🎉 СТАТЬЯ УСПЕШНО СОЗДАНА! (Объем: {len(article_text)} знаков | Модель: {selected_model})")
+
+            # Сборка HTML
+            html_ready = f"""<!DOCTYPE html><html><head><meta charset='UTF-8'><title>{target_title}</title></head><body style='background:#0f172a; color:#f8fafc; font-family:sans-serif; padding:30px; line-height:1.7;'><div style='max-width:900px; margin:0 auto; background:#1e293b; padding:40px; border-radius:12px;'><h1>{target_title}</h1><div style='background:#090d16; padding:15px; border-radius:8px; border:1px dashed #38bdf8; margin:20px 0;'><strong>🎯 Заголовки Discover:</strong><pre>{final_titles}</pre></div><div style='background:#090d16; padding:15px; border-radius:8px; border:1px dashed #38bdf8; margin:20px 0;'><strong>🎨 Промпты для Reve:</strong><pre>{reve_prompts}</pre></div><div style='background:#090d16; padding:15px; border-radius:8px; border:1px dashed #38bdf8; margin:20px 0;'><strong>📊 Рисунки из PDF:</strong><pre>{figures_placement}</pre></div><hr style='border-color:#334155; margin:30px 0;'><div>{md_to_html(article_text)}</div></div></body></html>"""
+
+            st.download_button(
+                label="📥 Скачать готовую статью в HTML",
+                data=html_ready,
+                file_name=f"ready_article_{datetime.now().strftime('%Y%m%d_%H%M')}.html",
+                mime="text/html",
+                type="primary"
+            )
+
+            # Вывод на экран
+            c1, c2 = st.columns(2)
+            with c1:
+                st.subheader("🎯 Заголовки Google Discover")
+                st.text_area("Варианты названий:", value=final_titles, height=180)
+            with c2:
+                st.subheader("🎨 Промпты для Reve (EN + RU)")
+                st.text_area("Иллюстрации:", value=reve_prompts, height=180)
+
+            st.subheader("📊 Рисунки из исследования")
+            st.info(figures_placement)
+
+            st.markdown("---")
+            st.subheader("📄 Текст статьи (Готово для iXBT)")
+            st.markdown(article_text)
+
+        except Exception as e:
+            status_text.error(f"❌ Ошибка генерации: {e}")
+
+# ----------------- ВКЛАДКА 3: GOOGLE ТАБЛИЦА -----------------
 with tab_history:
     st.title("📊 Вечный архив (Google Таблица)")
     st.caption("Все ранее найденные темы, сохраненные на вашем Google Диске")
-    
+
     if st.button("🔄 Обновить историю из Google Таблицы"):
         st.session_state["gsheets_history"] = fetch_from_gsheets()
-        
+
     if "gsheets_history" not in st.session_state:
         st.session_state["gsheets_history"] = fetch_from_gsheets()
-        
+
     history_items = st.session_state["gsheets_history"]
     st.write(f"Всего статей в вашей Google Таблице: **{len(history_items)}**")
-    
-    if history_items:
-        hist_html = generate_html_report(history_items, "Полный архив исследований")
-        st.download_button("📥 Скачать весь архив в HTML", data=hist_html, file_name="archive_radar.html", mime="text/html")
-        
+
     for r in history_items[:30]:
         with st.expander(f"[{r.get('score')}/10] [{r.get('category')}] {r.get('titles', [''])[0]} | 📅 {r.get('created_at')}"):
             st.markdown(f"**Суть:** {r.get('ru_tldr')}")
