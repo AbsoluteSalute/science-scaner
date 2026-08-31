@@ -59,7 +59,6 @@ SSL_CTX.verify_mode = ssl.CERT_NONE
 HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36'}
 
 def get_radar_keys():
-    """Берет ключи строго для Радара"""
     try:
         if hasattr(st, "secrets"):
             raw = st.secrets.get("RADAR_API_KEYS") or st.secrets.get("GEMINI_API_KEYS", "")
@@ -70,7 +69,6 @@ def get_radar_keys():
     return []
 
 def get_farm_keys():
-    """Берет ключи строго для Контент-Фермы"""
     try:
         if hasattr(st, "secrets"):
             raw = st.secrets.get("FARM_API_KEYS") or st.secrets.get("GEMINI_API_KEYS", "")
@@ -93,15 +91,15 @@ Transform raw input (scientific papers, technical reports, news briefs, or gener
 TONE & STYLE:
 1. Intelligent & Engaging: Write vividly and rhythmically. Avoid dry academic tone, but never dumb it down to a childish level. Respect the reader's intelligence.
 2. Analytical: Do not just describe *what* happened. Explain *how* it works, *why* it matters, and *what* the consequences are. Focus on the mechanics and the logic.
-3. Visual & Metaphorical: Use strong imagery and analogies to explain complex concepts (e.g., compare computer networks to fungal mycelium, or thermodynamic processes to piston engines).
+3. Visual & Metaphorical: Use strong imagery and analogies to explain complex concepts.
 4. Rhythm: Alternating sentence lengths. Use short, punchy sentences for emphasis.
 
 EDITORIAL RULES (STRICT):
-- NO "Translationese": The Russian text must sound natural, not like a translated English text. Avoid calques.
-- NO Clichés: Ban phrases like "Time will tell," "Science does not stand still," "British scientists have proven."
-- NO Passive Voice Abuse: Use active verbs. Instead of "The experiment was conducted," use "Engineers conducted the experiment."
-- NO Fluff: Every sentence must carry new information or emotional weight. Cut introductory nonsense like "In today's world..."
-- Structure: Always use engaging Hooks (intros), meaningful Subheadings, and a thought-provoking Outro (not just a summary).
+- NO "Translationese": The Russian text must sound natural.
+- NO Clichés: Ban phrases like "Time will tell," "Science does not stand still."
+- NO Passive Voice Abuse: Use active verbs.
+- NO Fluff: Cut introductory nonsense like "In today's world..."
+- Structure: Always use engaging Hooks, meaningful Subheadings, and a thought-provoking Outro.
 
 PROCESS:
 1. Analyze the core conflict or breakthrough in the source material.
@@ -109,7 +107,7 @@ PROCESS:
 3. Write the article in Russian, ensuring high-quality formatting (Markdown).
 
 BEHAVIOR:
-You are not a chatbot assisting a user; you are a writer crafting a piece. Do not use conversational fillers like "Here is your article." Just provide the Title and the Article content. Жди исходник"""
+Do not use conversational fillers. Just provide the Title and Article content. Жди исходник"""
 
 PROMPT_2_REVIEWER = """***
 
@@ -388,6 +386,29 @@ def md_to_html(md):
     return "\n".join([f"<p>{p.strip()}</p>" if p.strip() and not p.strip().startswith('<h') and not p.strip().startswith('<blockquote') else p.strip() for p in h.split('\n\n') if p.strip()])
 
 # ==========================================
+# БЕЗОПАСНАЯ ОТПРАВКА С РОТАЦИЕЙ (БЕЗ NONLOCAL)
+# ==========================================
+
+def safe_send_step(chat, keys, model_name, key_idx, msg):
+    """Безопасно выполняет шаг, а при ошибке квоты переносит память на следующий ключ"""
+    for attempt in range(len(keys) * 2):
+        try:
+            resp = chat.send_message(msg)
+            return resp, chat, key_idx
+        except Exception as e:
+            err = str(e)
+            if "429" in err or "quota" in err.lower() or "resource" in err.lower():
+                key_idx = (key_idx + 1) % len(keys)
+                saved_hist = list(chat.history)
+                genai.configure(api_key=keys[key_idx])
+                m = genai.GenerativeModel(model_name, generation_config={"temperature": 0.25, "max_output_tokens": 8192})
+                chat = m.start_chat(history=saved_hist)
+                time.sleep(2)
+            else:
+                raise e
+    raise Exception("Все ключи фермы исчерпали квоту.")
+
+# ==========================================
 # САЙДБАР (РАЗДЕЛЬНЫЕ СЧЕТЧИКИ КЛЮЧЕЙ)
 # ==========================================
 radar_keys = get_radar_keys()
@@ -442,7 +463,7 @@ with st.sidebar:
 # ==========================================
 tab_live, tab_farm, tab_history = st.tabs(["🔭 Свежий Радар", "🏭 Контент-Ферма", "📊 Вечный архив (Google Таблица)"])
 
-# ----------------- ВКЛАДКА 1: РАДАР (ИСПОЛЬЗУЕТ RADAR_API_KEYS) -----------------
+# ----------------- ВКЛАДКА 1: РАДАР -----------------
 with tab_live:
     st.title("🔭 Свежий Sci-Radar")
     st.caption("Поиск свежих открытий ➔ Анализ через Gemini 3.6 Flash ➔ Сохранение в Google Таблицу")
@@ -496,7 +517,7 @@ with tab_live:
                 st.markdown(f"**Парадокс:** {res.get('hook_angle')}")
                 st.markdown(f"[🔗 Источник исследования]({res.get('link')})")
 
-# ----------------- ВКЛАДКА 2: ФЕРМА (ИСПОЛЬЗУЕТ FARM_API_KEYS) -----------------
+# ----------------- ВКЛАДКА 2: ФЕРМА -----------------
 with tab_farm:
     st.title("🏭 Облачная Контент-Ферма")
     st.caption("Автоматическая 8-шаговая генерация лонгридов на Gemini 3.6 Flash (Выделенный пул ключей Фермы)")
@@ -547,80 +568,62 @@ with tab_farm:
         payload, payload_type = get_paper_payload(target_url, target_title, target_summary)
         progress_bar.progress(10)
 
-        # 2. Инициализация чата на выделенных ключах Фермы
-        genai.configure(api_key=farm_keys[0])
+        # 2. Инициализация чата
+        current_k_idx = 0
+        genai.configure(api_key=farm_keys[current_k_idx])
         model = genai.GenerativeModel(selected_model, generation_config={"temperature": 0.25, "max_output_tokens": 8192})
         chat = model.start_chat(history=[])
-
-        key_idx = 0
-        def safe_send(msg):
-            nonlocal key_idx, chat
-            for attempt in range(len(farm_keys) * 2):
-                try:
-                    return chat.send_message(msg)
-                except Exception as e:
-                    err = str(e)
-                    if "429" in err or "quota" in err.lower() or "resource" in err.lower():
-                        key_idx = (key_idx + 1) % len(farm_keys)
-                        saved_hist = list(chat.history)
-                        genai.configure(api_key=farm_keys[key_idx])
-                        m = genai.GenerativeModel(selected_model, generation_config={"temperature": 0.25, "max_output_tokens": 8192})
-                        chat = m.start_chat(history=saved_hist)
-                        time.sleep(2)
-                    else:
-                        raise e
-            raise Exception("Все ключи фермы исчерпаны")
 
         try:
             # Шаг 1: Роль
             status_text.write("🔹 **[1/8] Отправка роли научного редактора...**")
-            safe_send(PROMPT_1_ROLE)
+            _, chat, current_k_idx = safe_send_step(chat, farm_keys, selected_model, current_k_idx, PROMPT_1_ROLE)
             progress_bar.progress(25)
             time.sleep(2)
 
-            # Шаг 2: Исходник + Черновик (ПОЛНЫЙ ПРОМПТ «НАУЧНЫЙ ОБОЗРЕВАТЕЛЬ»)
+            # Шаг 2: Исходник + Черновик
             status_text.write("🔹 **[2/8] Черновик статьи (Научный обозреватель + фактура)...**")
-            safe_send([payload, PROMPT_2_REVIEWER])
+            _, chat, current_k_idx = safe_send_step(chat, farm_keys, selected_model, current_k_idx, [payload, PROMPT_2_REVIEWER])
             progress_bar.progress(40)
             time.sleep(2)
 
             # Шаг 3: Строго без сравнений
             status_text.write("🔹 **[3/8] Перепиши строго, без сравнений...**")
-            safe_send(PROMPT_3_STRICT)
+            _, chat, current_k_idx = safe_send_step(chat, farm_keys, selected_model, current_k_idx, PROMPT_3_STRICT)
             progress_bar.progress(55)
             time.sleep(2)
 
             # Шаг 4: 8000+ знаков
             status_text.write("🔹 **[4/8] Понятными словами, не менее 8000 знаков...**")
-            safe_send(PROMPT_4_LENGTH)
+            _, chat, current_k_idx = safe_send_step(chat, farm_keys, selected_model, current_k_idx, PROMPT_4_LENGTH)
             progress_bar.progress(70)
             time.sleep(2)
 
             # Шаг 5: Формулы
             status_text.write("🔹 **[5/8] Зачистка формул и LaTeX-разметки...**")
-            r5 = safe_send(PROMPT_5_FORMULAS)
+            r5, chat, current_k_idx = safe_send_step(chat, farm_keys, selected_model, current_k_idx, PROMPT_5_FORMULAS)
             article_text = r5.text.strip()
             progress_bar.progress(80)
             time.sleep(2)
 
             # Шаг 6: Заголовки Discover
             status_text.write("🔹 **[6/8] Генерация заголовков Google Discover «на грани»...**")
-            safe_send(PROMPT_6A_TITLES)
+            _, chat, current_k_idx = safe_send_step(chat, farm_keys, selected_model, current_k_idx, PROMPT_6A_TITLES)
             time.sleep(1)
-            r6b = safe_send(PROMPT_6B_TITLES_EDGE)
+            r6b, chat, current_k_idx = safe_send_step(chat, farm_keys, selected_model, current_k_idx, PROMPT_6B_TITLES_EDGE)
             final_titles = r6b.text.strip()
             progress_bar.progress(90)
             time.sleep(2)
 
             # Шаг 7: Рисунки
             status_text.write("🔹 **[7/8] Анализ оригинальных рисунков из исследования...**")
-            r7 = safe_send(PROMPT_7_FIGURES)
+            r7, chat, current_k_idx = safe_send_step(chat, farm_keys, selected_model, current_k_idx, PROMPT_7_FIGURES)
             figures_placement = r7.text.strip()
             time.sleep(2)
 
             # Шаг 8: Промпты Reve
             status_text.write("🔹 **[8/8] Промпты для генератора Reve (EN + RU, Фотореализм)...**")
-            r8 = safe_send(PROMPT_8_REVE)
+            r8, chat, current_k_idx = safe_send_step(chat, farm_keys, selected_model, current_k_idx, PROMPT_8_REVE)
             reve_prompts = r8.text.strip()
             progress_bar.progress(100)
 
