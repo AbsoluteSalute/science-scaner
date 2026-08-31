@@ -79,7 +79,7 @@ def get_farm_keys():
     return []
 
 # ==========================================
-# ВАШИ 8 ПРОМПТОВ ДЛЯ ФЕРМЫ (ПОЛНАЯ ВЕРСИЯ)
+# ВАШИ 8 ПРОМПТОВ ДЛЯ ФЕРМЫ
 # ==========================================
 
 PROMPT_1_ROLE = """ROLE:
@@ -99,7 +99,7 @@ EDITORIAL RULES (STRICT):
 - NO Clichés: Ban phrases like "Time will tell," "Science does not stand still."
 - NO Passive Voice Abuse: Use active verbs.
 - NO Fluff: Cut introductory nonsense like "In today's world..."
-- Structure: Always use engaging Hooks (intros), meaningful Subheadings, and a thought-provoking Outro.
+- Structure: Always use engaging Hooks, meaningful Subheadings, and a thought-provoking Outro.
 
 PROCESS:
 1. Analyze the core conflict or breakthrough in the source material.
@@ -171,7 +171,6 @@ def format_inline(text):
     return text
 
 def md_to_ixbt_html(md_text):
-    """Преобразует Markdown в чистую верстку HTML со списками и цитатами без мусора"""
     lines = md_text.split('\n')
     html_lines = []
     in_ul = False
@@ -187,7 +186,6 @@ def md_to_ixbt_html(md_text):
             if in_blockquote: html_lines.append("</blockquote>"); in_blockquote = False
             continue
             
-        # Заголовки (h3 и h2 для редактора)
         if stripped.startswith('### '):
             if in_ul: html_lines.append("</ul>"); in_ul = False
             if in_ol: html_lines.append("</ol>"); in_ol = False
@@ -204,7 +202,6 @@ def md_to_ixbt_html(md_text):
             html_lines.append(f"<h2>{format_inline(stripped[2:])}</h2>")
             continue
             
-        # Цитаты / Врезки
         if stripped.startswith('> '):
             if not in_blockquote:
                 html_lines.append("<blockquote>")
@@ -215,7 +212,6 @@ def md_to_ixbt_html(md_text):
             html_lines.append("</blockquote>")
             in_blockquote = False
             
-        # Маркированные списки (*, -, •)
         ul_match = re.match(r'^[\*\-\•]\s+(.*)$', stripped)
         if ul_match:
             if not in_ul:
@@ -225,7 +221,6 @@ def md_to_ixbt_html(md_text):
             html_lines.append(f"<li>{format_inline(ul_match.group(1))}</li>")
             continue
             
-        # Нумерованные списки
         ol_match = re.match(r'^\d+[\.\)]\s+(.*)$', stripped)
         if ol_match:
             if not in_ol:
@@ -362,6 +357,8 @@ BATCH_SYSTEM_PROMPT = """
 
 def fetch_single_feed(feed_name, feed_url, items_per_feed):
     articles = []
+    status = "ok"
+    err = ""
     try:
         req = urllib.request.Request(feed_url, headers=HEADERS)
         with urllib.request.urlopen(req, context=SSL_CTX, timeout=6) as response:
@@ -372,9 +369,13 @@ def fetch_single_feed(feed_name, feed_url, items_per_feed):
                     summary = re.sub(r'<[^>]+>', '', entry.get("summary", entry.get("description", ""))).replace("\n", " ").strip()
                     link = entry.get("link", "")
                     articles.append({"source": feed_name, "title": title, "summary": summary[:1200], "link": link})
-    except:
-        pass
-    return articles
+            else:
+                status = "empty"
+                err = "Лента пуста"
+    except Exception as e:
+        status = "error"
+        err = str(e)
+    return {"name": feed_name, "status": status, "error": err, "articles": articles}
 
 def clean_json(text):
     text = re.sub(r'^```json\s*|\s*```$', '', text.strip(), flags=re.IGNORECASE)
@@ -486,7 +487,7 @@ def safe_send_step(chat, keys, model_name, key_idx, msg):
     raise Exception("Все ключи фермы исчерпали квоту.")
 
 # ==========================================
-# САЙДБАР (УПРАВЛЕНИЕ)
+# САЙДБАР
 # ==========================================
 radar_keys = get_radar_keys()
 farm_keys = get_farm_keys()
@@ -551,16 +552,23 @@ with tab_live:
 
     if st.button("🚀 Сканировать свежую науку", type="primary"):
         all_articles = []
+        feed_reports = []
+        
         with st.spinner("Опрос выбранных научных журналов..."):
             with ThreadPoolExecutor(max_workers=15) as ex:
                 futures = [ex.submit(fetch_single_feed, name, active_feeds[name], items_per_feed) for name in active_feeds.keys()]
                 for f in as_completed(futures):
                     res = f.result()
-                    if res["status"] == "ok":
-                        all_articles.extend(res["articles"])
+                    feed_reports.append(res)
+                    if isinstance(res, dict) and res.get("status") == "ok":
+                        all_articles.extend(res.get("articles", []))
 
         seen = set()
         unique = [x for x in all_articles if x["link"] not in seen and not seen.add(x["link"])]
+
+        ok_feeds = [f for f in feed_reports if isinstance(f, dict) and f.get("status") == "ok"]
+        failed_feeds = [f for f in feed_reports if isinstance(f, dict) and f.get("status") != "ok"]
+        st.session_state["feed_diag"] = {"ok": ok_feeds, "failed": failed_feeds}
 
         if not unique:
             st.warning("Все свежие статьи уже обработаны!")
@@ -583,6 +591,16 @@ with tab_live:
             st.session_state["latest_results"] = sorted_res
             sync_to_gsheets(sorted_res)
             st.success(f"Готово! Обработано {len(sorted_res)} тем и записано в Google Таблицу.")
+
+    if "feed_diag" in st.session_state:
+        diag = st.session_state["feed_diag"]
+        with st.expander(f"📊 Статус опроса источников: Успешно ({len(diag['ok'])}) | Проблемных ({len(diag['failed'])})", expanded=False):
+            if diag["failed"]:
+                st.error("Следующие журналы не ответили:")
+                for f in diag["failed"]:
+                    st.markdown(f"- **{f['name']}** ➔ `{f['error']}`")
+            st.success(f"Успешно ответили ({len(diag['ok'])} журналов):")
+            st.markdown(" • ".join([f"**{f['name']}** ({len(f['articles'])} новых)" for f in diag["ok"]]))
 
     if "latest_results" in st.session_state:
         filtered = [r for r in st.session_state["latest_results"] if r.get("score", 0) >= min_score]
@@ -640,51 +658,43 @@ with tab_farm:
         progress_bar = st.progress(0)
         status_text = st.empty()
 
-        # 1. Извлечение материала
         status_text.write("🌐 **[0/8] Загружаем оригинальный PDF / материалы статьи...**")
         payload, payload_type = get_paper_payload(target_url, target_title, target_summary)
         progress_bar.progress(10)
 
-        # 2. Инициализация чата
         current_k_idx = 0
         genai.configure(api_key=farm_keys[current_k_idx])
         model = genai.GenerativeModel(selected_model, generation_config={"temperature": 0.25, "max_output_tokens": 8192})
         chat = model.start_chat(history=[])
 
         try:
-            # Шаг 1: Роль
             status_text.write("🔹 **[1/8] Отправка роли научного редактора...**")
             _, chat, current_k_idx = safe_send_step(chat, farm_keys, selected_model, current_k_idx, PROMPT_1_ROLE)
             progress_bar.progress(25)
             time.sleep(2)
 
-            # Шаг 2: Исходник + Черновик
             status_text.write("🔹 **[2/8] Черновик статьи (Научный обозреватель + фактура)...**")
             _, chat, current_k_idx = safe_send_step(chat, farm_keys, selected_model, current_k_idx, [payload, PROMPT_2_REVIEWER])
             progress_bar.progress(40)
             time.sleep(2)
 
-            # Шаг 3: Строго без сравнений
             status_text.write("🔹 **[3/8] Перепиши строго, без сравнений...**")
             _, chat, current_k_idx = safe_send_step(chat, farm_keys, selected_model, current_k_idx, PROMPT_3_STRICT)
             progress_bar.progress(55)
             time.sleep(2)
 
-            # Шаг 4: 8000+ знаков
             status_text.write("🔹 **[4/8] Понятными словами, не менее 8000 знаков...**")
             _, chat, current_k_idx = safe_send_step(chat, farm_keys, selected_model, current_k_idx, PROMPT_4_LENGTH)
             progress_bar.progress(70)
             time.sleep(2)
 
-            # Шаг 5: Формулы
             status_text.write("🔹 **[5/8] Зачистка формул и LaTeX-разметки...**")
             r5, chat, current_k_idx = safe_send_step(chat, farm_keys, selected_model, current_k_idx, PROMPT_5_FORMULAS)
             article_text = r5.text.strip()
             progress_bar.progress(80)
             time.sleep(2)
 
-            # Шаг 6: Заголовки Discover
-            status_text.write("🔹 **[6/8] Генерация заголовков Google Discover «на грани»...**")
+            status_text.write("🔹 **[6/8] Генерация заголовков Discover «на грани»...**")
             _, chat, current_k_idx = safe_send_step(chat, farm_keys, selected_model, current_k_idx, PROMPT_6A_TITLES)
             time.sleep(1)
             r6b, chat, current_k_idx = safe_send_step(chat, farm_keys, selected_model, current_k_idx, PROMPT_6B_TITLES_EDGE)
@@ -692,23 +702,21 @@ with tab_farm:
             progress_bar.progress(90)
             time.sleep(2)
 
-            # Шаг 7: Рисунки
             status_text.write("🔹 **[7/8] Анализ оригинальных рисунков из исследования...**")
             r7, chat, current_k_idx = safe_send_step(chat, farm_keys, selected_model, current_k_idx, PROMPT_7_FIGURES)
             figures_placement = r7.text.strip()
             time.sleep(2)
 
-            # Шаг 8: Промпты Reve
-            status_text.write("🔹 **[8/8] Промпты для генератора Reve (EN + RU, Фотореализм)...**")
+            status_text.write("🔹 **[8/8] Промпты для Reve (EN + RU, Фотореализм)...**")
             r8, chat, current_k_idx = safe_send_step(chat, farm_keys, selected_model, current_k_idx, PROMPT_8_REVE)
             reve_prompts = r8.text.strip()
             progress_bar.progress(100)
 
             status_text.success(f"🎉 СТАТЬЯ УСПЕШНО СОЗДАНА! (Объем: {len(article_text)} знаков | Модель: {selected_model})")
 
-            # Чистый HTML без плейсхолдеров и лишних блоков
             article_ixbt_html = md_to_ixbt_html(article_text)
 
+            # HTML со 100% рабочим двойным скриптом копирования для файлов и браузера
             html_ready = f"""<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -723,8 +731,8 @@ with tab_farm:
         h3 {{ color: #7dd3fc; font-size: 18px; margin-top: 20px; }}
         .box {{ background: #090d16; border: 1px dashed var(--accent); padding: 20px; border-radius: 10px; margin: 25px 0; }}
         .box-t {{ color: var(--accent); font-weight: bold; font-size: 16px; margin-bottom: 10px; display: block; }}
-        .btn {{ background: var(--accent); color: #000; font-weight: bold; border: none; padding: 14px 24px; border-radius: 8px; cursor: pointer; font-size: 15px; display: inline-block; margin-bottom: 20px; }}
-        .btn:hover {{ opacity: 0.9; }}
+        .btn {{ background: var(--accent); color: #000; font-weight: bold; border: none; padding: 14px 24px; border-radius: 8px; cursor: pointer; font-size: 15px; display: inline-block; margin-bottom: 20px; transition: 0.2s; }}
+        .btn:hover {{ opacity: 0.9; transform: scale(1.01); }}
         pre {{ white-space: pre-wrap; font-family: inherit; margin: 0; }}
         
         ul, ol {{ margin: 16px 0 20px 24px; padding-left: 10px; }}
@@ -737,26 +745,48 @@ with tab_farm:
     <script>
         function copyFormattedForIXBT() {{
             const articleEl = document.getElementById('ixbt-article-content');
-            const type = 'text/html';
-            const plainText = articleEl.innerText;
-            const htmlText = articleEl.innerHTML;
-            
-            const blobHtml = new Blob([htmlText], {{ type: 'text/html' }});
-            const blobText = new Blob([plainText], {{ type: 'text/plain' }});
-            
-            const data = [new ClipboardItem({{ 'text/html': blobHtml, 'text/plain': blobText }})];
-            
-            navigator.clipboard.write(data).then(() => {{
-                alert('✅ Статья скопирована с полным форматированием! Просто нажмите Ctrl+V в редакторе iXBT Live.');
-            }}).catch(() => {{
-                navigator.clipboard.writeText(plainText).then(() => alert('Скопировано как текст!'));
-            }});
+            if (!articleEl) return;
+
+            // 1. Метод Selection API (100% работает в локальных HTML-файлах file://)
+            try {{
+                const range = document.createRange();
+                range.selectNodeContents(articleEl);
+                const sel = window.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(range);
+                document.execCommand('copy');
+                sel.removeAllRanges();
+                showSuccess();
+                return;
+            }} catch(e) {{}}
+
+            // 2. Метод Clipboard API
+            if (navigator.clipboard) {{
+                const blobHtml = new Blob([articleEl.innerHTML], {{ type: 'text/html' }});
+                const blobText = new Blob([articleEl.innerText], {{ type: 'text/plain' }});
+                navigator.clipboard.write([new ClipboardItem({{ 'text/html': blobHtml, 'text/plain': blobText }})])
+                    .then(showSuccess)
+                    .catch(() => navigator.clipboard.writeText(articleEl.innerText).then(showSuccess));
+            }}
+        }}
+
+        function showSuccess() {{
+            const btn = document.getElementById('btn-copy-main');
+            if (btn) {{
+                const old = btn.innerText;
+                btn.innerText = '✅ СКОПИРОВАНО В ФОРМАТЕ iXBT!';
+                btn.style.background = '#10b981';
+                setTimeout(() => {{
+                    btn.innerText = old;
+                    btn.style.background = '#38bdf8';
+                }}, 3000);
+            }}
         }}
     </script>
 </head>
 <body>
     <div class="container">
-        <button class="btn" onclick="copyFormattedForIXBT()">📋 Скопировать форматированную статью для iXBT Live (Ctrl+V)</button>
+        <button id="btn-copy-main" class="btn" onclick="copyFormattedForIXBT()">📋 Скопировать форматированную статью для iXBT Live (Ctrl+V)</button>
         <div style="color: #94a3b8; font-size: 14px; margin-bottom: 25px;">Автор: <strong>Ruby_Rougarou</strong> | Модель: <strong>{selected_model}</strong> | Объем: <strong>{len(article_text)} знаков</strong></div>
 
         <!-- ШПАРАГАЛКА 1: ЗАГОЛОВКИ -->
@@ -767,13 +797,13 @@ with tab_farm:
 
         <!-- ШПАРАГАЛКА 2: ПРОМПТЫ ДЛЯ REVE -->
         <div class="box">
-            <span class="box-t">🎨 Промпты для генератора Reve (EN + RU, Фотореализм):</span>
+            <span class="box-t">🎨 Промпты для Reve (EN + RU):</span>
             <pre>{reve_prompts}</pre>
         </div>
 
         <!-- ШПАРАГАЛКА 3: РИСУНКИ ИЗ PDF -->
         <div class="box">
-            <span class="box-t">📊 Графики из исследования (где и какие брать):</span>
+            <span class="box-t">📊 Рисунки из исследования (где и какие брать):</span>
             <pre>{figures_placement}</pre>
         </div>
 
@@ -795,7 +825,6 @@ with tab_farm:
                 type="primary"
             )
 
-            # Вывод на страницу
             c1, c2 = st.columns(2)
             with c1:
                 st.subheader("🎯 Заголовки Google Discover")
