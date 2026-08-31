@@ -79,7 +79,7 @@ def get_farm_keys():
     return []
 
 # ==========================================
-# ВАШИ 8 ПРОМПТОВ ДЛЯ ФЕРМЫ (ПОЛНАЯ ВЕРСИЯ)
+# ВАШИ 8 ПРОМПТОВ ДЛЯ ФЕРМЫ
 # ==========================================
 
 PROMPT_1_ROLE = """ROLE:
@@ -289,24 +289,15 @@ def fetch_from_gsheets():
         return []
 
 def get_all_scanned_urls():
-    """Собирает список всех когда-либо просканированных ссылок из Google Таблицы и сессии"""
     known = set()
-    
-    # 1. Из Google Таблицы (вечный архив)
     gs_items = fetch_from_gsheets()
     for item in gs_items:
         l = item.get("link", "").strip()
         if l: known.add(l)
-        
-    # 2. Из кэша текущей сессии
     if "session_scanned_urls" in st.session_state:
         known.update(st.session_state["session_scanned_urls"])
-        
     return known
 
-# ==========================================
-# ПОЛНАЯ БАЗА НАУЧНЫХ ЖУРНАЛОВ
-# ==========================================
 SCIENCE_DATABASE = {
     "🏛️ Топ-журналы (Nature & Пресс-релизы)": {
         "🏆 Nature": "https://www.nature.com/nature.rss",
@@ -385,9 +376,7 @@ def fetch_single_feed(feed_name, feed_url, items_per_feed, known_urls):
             if parsed.entries:
                 for entry in parsed.entries[:items_per_feed]:
                     link = entry.get("link", "").strip()
-                    # СВЕРКА: ЕСЛИ СТАТЬЯ УЖЕ ЕСТЬ В GOOGLE ТАБЛИЦЕ — ПРОПУСКАЕМ!
-                    if link in known_urls:
-                        continue
+                    if link in known_urls: continue
                     title = entry.get("title", "").replace("\n", " ").strip()
                     summary = re.sub(r'<[^>]+>', '', entry.get("summary", entry.get("description", ""))).replace("\n", " ").strip()
                     articles.append({"source": feed_name, "title": title, "summary": summary[:1200], "link": link})
@@ -563,7 +552,7 @@ with st.sidebar:
 # ==========================================
 tab_live, tab_farm, tab_history = st.tabs(["🔭 Свежий Радар", "🏭 Контент-Ферма (iXBT Studio)", "📊 Вечный архив (Google Таблица)"])
 
-# ----------------- ВКЛАДКА 1: РАДАР (С ДЕДУПЛИКАЦИЕЙ ПО GOOGLE ТАБЛИЦЕ) -----------------
+# ----------------- ВКЛАДКА 1: РАДАР -----------------
 with tab_live:
     st.title("🔭 Свежий Sci-Radar")
     st.caption("Сверка с Google Таблицей ➔ Анализ новых статей через Gemini 3.6 Flash ➔ Сохранение в архив")
@@ -575,8 +564,6 @@ with tab_live:
     if st.button("🚀 Сканировать свежую науку", type="primary"):
         all_articles = []
         feed_reports = []
-        
-        # Получаем полный список всех когда-либо просканированных ссылок
         known_urls = get_all_scanned_urls()
         
         with st.spinner("Опрос выбранных научных журналов и сверка с архивом..."):
@@ -615,7 +602,6 @@ with tab_live:
             sorted_res = sorted(results, key=lambda x: x.get("score", 0), reverse=True)
             st.session_state["latest_results"] = sorted_res
             
-            # Сохраняем в кэш сессии и отправляем в Google Таблицу
             if "session_scanned_urls" not in st.session_state:
                 st.session_state["session_scanned_urls"] = set()
             for r in sorted_res:
@@ -644,7 +630,7 @@ with tab_live:
                 st.markdown(f"**Парадокс:** {res.get('hook_angle')}")
                 st.markdown(f"[🔗 Источник исследования]({res.get('link')})")
 
-# ----------------- ВКЛАДКА 2: ФЕРМА -----------------
+# ----------------- ВКЛАДКА 2: ФЕРМА С ПОЛНОЙ ПОДДЕРЖКОЙ IPHONE / SAFARI -----------------
 with tab_farm:
     st.title("🏭 Контент-Ферма (Студия iXBT Live)")
     st.caption("8-шаговый пайплайн Ruby_Rougarou ➔ Форматирование в чистый HTML iXBT Live")
@@ -776,23 +762,28 @@ with tab_farm:
 
             article_ixbt_html = md_to_ixbt_html(article_text)
 
+            # HTML со специальным iOS/Safari механизмом копирования
             html_ready = f"""<!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{target_title} | Ruby_Rougarou</title>
     <style>
         :root {{ --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --accent: #38bdf8; --border: #334155; }}
-        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); padding: 30px; line-height: 1.7; }}
-        .container {{ max-width: 950px; margin: 0 auto; background: var(--card); padding: 40px; border-radius: 14px; border: 1px solid var(--border); }}
-        h1 {{ color: #fff; font-size: 26px; line-height: 1.3; margin-bottom: 20px; }}
-        h2 {{ color: var(--accent); font-size: 22px; margin-top: 35px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }}
-        h3 {{ color: #7dd3fc; font-size: 18px; margin-top: 20px; }}
-        .box {{ background: #090d16; border: 1px dashed var(--accent); padding: 20px; border-radius: 10px; margin: 25px 0; }}
-        .box-t {{ color: var(--accent); font-weight: bold; font-size: 16px; margin-bottom: 10px; display: block; }}
-        .btn {{ background: var(--accent); color: #000; font-weight: bold; border: none; padding: 14px 24px; border-radius: 8px; cursor: pointer; font-size: 15px; display: inline-block; margin-bottom: 20px; transition: 0.2s; }}
-        .btn:hover {{ opacity: 0.9; transform: scale(1.01); }}
-        pre {{ white-space: pre-wrap; font-family: inherit; margin: 0; }}
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); padding: 20px; line-height: 1.7; }}
+        .container {{ max-width: 950px; margin: 0 auto; background: var(--card); padding: 30px; border-radius: 14px; border: 1px solid var(--border); }}
+        h1 {{ color: #fff; font-size: 24px; line-height: 1.3; margin-bottom: 20px; }}
+        h2 {{ color: var(--accent); font-size: 20px; margin-top: 30px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }}
+        h3 {{ color: #7dd3fc; font-size: 17px; margin-top: 20px; }}
+        .box {{ background: #090d16; border: 1px dashed var(--accent); padding: 16px; border-radius: 10px; margin: 20px 0; }}
+        .box-t {{ color: var(--accent); font-weight: bold; font-size: 15px; margin-bottom: 8px; display: block; }}
+        
+        .btn-group {{ display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }}
+        .btn {{ background: var(--accent); color: #000; font-weight: bold; border: none; padding: 12px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; transition: 0.2s; }}
+        .btn-alt {{ background: #475569; color: #fff; font-weight: bold; border: none; padding: 12px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; }}
+        
+        pre {{ white-space: pre-wrap; font-family: inherit; margin: 0; font-size: 13px; }}
         
         ul, ol {{ margin: 16px 0 20px 24px; padding-left: 10px; }}
         li {{ margin-bottom: 8px; line-height: 1.6; }}
@@ -800,42 +791,62 @@ with tab_farm:
         ol li {{ list-style-type: decimal; }}
         blockquote {{ background: #0f2744; border-left: 4px solid var(--accent); margin: 20px 0; padding: 14px 20px; border-radius: 6px; font-style: italic; }}
         p {{ margin-bottom: 16px; }}
+        
+        #ixbt-article-content {{ -webkit-user-select: text; user-select: text; }}
     </style>
     <script>
+        // Универсальное копирование для iPhone / Safari / Android / ПК
         function copyFormattedForIXBT() {{
-            const articleEl = document.getElementById('ixbt-article-content');
-            if (!articleEl) return;
+            const el = document.getElementById('ixbt-article-content');
+            if (!el) return;
 
+            // iOS contentEditable активация
+            el.setAttribute('contenteditable', 'true');
+            el.focus();
+            
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+            
+            let ok = false;
             try {{
-                const range = document.createRange();
-                range.selectNodeContents(articleEl);
-                const sel = window.getSelection();
-                sel.removeAllRanges();
-                sel.addRange(range);
-                document.execCommand('copy');
-                sel.removeAllRanges();
-                showSuccess();
-                return;
+                ok = document.execCommand('copy');
             }} catch(e) {{}}
-
-            if (navigator.clipboard) {{
-                const blobHtml = new Blob([articleEl.innerHTML], {{ type: 'text/html' }});
-                const blobText = new Blob([articleEl.innerText], {{ type: 'text/plain' }});
-                navigator.clipboard.write([new ClipboardItem({{ 'text/html': blobHtml, 'text/plain': blobText }})])
-                    .then(showSuccess)
-                    .catch(() => navigator.clipboard.writeText(articleEl.innerText).then(showSuccess));
+            
+            el.removeAttribute('contenteditable');
+            
+            if (ok) {{
+                sel.removeAllRanges();
+                showBtnSuccess('btn-copy-main', '✅ СКОПИРОВАНО ДЛЯ iXBT!');
+            }} else {{
+                // Если Safari заблокировал фоновое копирование, оставляем выделение
+                alert('📱 Текст статьи выделен! Нажмите «Скопировать» в появившемся меню iPhone.');
             }}
         }}
 
-        function showSuccess() {{
-            const btn = document.getElementById('btn-copy-main');
+        // Резервная кнопка для ручного выделения на iPhone
+        function selectForIphone() {{
+            const el = document.getElementById('ixbt-article-content');
+            if (!el) return;
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+            showBtnSuccess('btn-copy-alt', '👉 Нажмите «Скопировать» на экране');
+        }}
+
+        function showBtnSuccess(id, text) {{
+            const btn = document.getElementById(id);
             if (btn) {{
                 const old = btn.innerText;
-                btn.innerText = '✅ СКОПИРОВАНО В ФОРМАТЕ iXBT!';
+                btn.innerText = text;
                 btn.style.background = '#10b981';
                 setTimeout(() => {{
                     btn.innerText = old;
-                    btn.style.background = '#38bdf8';
+                    btn.style.background = id === 'btn-copy-main' ? '#38bdf8' : '#475569';
                 }}, 3000);
             }}
         }}
@@ -843,8 +854,12 @@ with tab_farm:
 </head>
 <body>
     <div class="container">
-        <button id="btn-copy-main" class="btn" onclick="copyFormattedForIXBT()">📋 Скопировать форматированную статью для iXBT Live (Ctrl+V)</button>
-        <div style="color: #94a3b8; font-size: 14px; margin-bottom: 25px;">Автор: <strong>Ruby_Rougarou</strong> | Модель: <strong>{selected_model}</strong> | Объем: <strong>{len(article_text)} знаков</strong></div>
+        <div class="btn-group">
+            <button id="btn-copy-main" class="btn" onclick="copyFormattedForIXBT()">📋 Скопировать форматированный текст (Ctrl+V / Tap)</button>
+            <button id="btn-copy-alt" class="btn-alt" onclick="selectForIphone()">📱 Выделить всю статью (для iPhone)</button>
+        </div>
+        
+        <div style="color: #94a3b8; font-size: 13px; margin-bottom: 20px;">Автор: <strong>Ruby_Rougarou</strong> | Модель: <strong>{selected_model}</strong> | Объем: <strong>{len(article_text)} знаков</strong></div>
 
         <!-- ШПАРАГАЛКА 1: ЗАГОЛОВКИ -->
         <div class="box">
@@ -860,11 +875,11 @@ with tab_farm:
 
         <!-- ШПАРАГАЛКА 3: РИСУНКИ ИЗ PDF -->
         <div class="box">
-            <span class="box-t">📊 Рисунки из исследования (где и какие брать):</span>
+            <span class="box-t">📊 Графики из исследования (где и какие брать):</span>
             <pre>{figures_placement}</pre>
         </div>
 
-        <hr style="border-color: var(--border); margin: 35px 0;">
+        <hr style="border-color: var(--border); margin: 30px 0;">
 
         <!-- ТОЛЬКО ЧИСТЫЙ ТЕКСТ СТАТЬИ ДЛЯ ВСТАВКИ -->
         <div id="ixbt-article-content">
