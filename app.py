@@ -79,7 +79,7 @@ def get_farm_keys():
     return []
 
 # ==========================================
-# ВАШИ 8 ПРОМПТОВ ДЛЯ ФЕРМЫ
+# ВАШИ 8 ПРОМПТОВ ДЛЯ ФЕРМЫ (ПОЛНАЯ ВЕРСИЯ)
 # ==========================================
 
 PROMPT_1_ROLE = """ROLE:
@@ -99,7 +99,7 @@ EDITORIAL RULES (STRICT):
 - NO Clichés: Ban phrases like "Time will tell," "Science does not stand still."
 - NO Passive Voice Abuse: Use active verbs.
 - NO Fluff: Cut introductory nonsense like "In today's world..."
-- Structure: Always use engaging Hooks, meaningful Subheadings, and a thought-provoking Outro.
+- Structure: Always use engaging Hooks (intros), meaningful Subheadings, and a thought-provoking Outro.
 
 PROCESS:
 1. Analyze the core conflict or breakthrough in the source material.
@@ -246,7 +246,7 @@ def md_to_ixbt_html(md_text):
     return "\n".join(html_lines)
 
 # ==========================================
-# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# ПАМЯТЬ И ПОЛНАЯ ДЕДУПЛИКАЦИЯ ЧЕРЕЗ GOOGLE ТАБЛИЦУ
 # ==========================================
 
 def sync_to_gsheets(items):
@@ -288,6 +288,25 @@ def fetch_from_gsheets():
     except:
         return []
 
+def get_all_scanned_urls():
+    """Собирает список всех когда-либо просканированных ссылок из Google Таблицы и сессии"""
+    known = set()
+    
+    # 1. Из Google Таблицы (вечный архив)
+    gs_items = fetch_from_gsheets()
+    for item in gs_items:
+        l = item.get("link", "").strip()
+        if l: known.add(l)
+        
+    # 2. Из кэша текущей сессии
+    if "session_scanned_urls" in st.session_state:
+        known.update(st.session_state["session_scanned_urls"])
+        
+    return known
+
+# ==========================================
+# ПОЛНАЯ БАЗА НАУЧНЫХ ЖУРНАЛОВ
+# ==========================================
 SCIENCE_DATABASE = {
     "🏛️ Топ-журналы (Nature & Пресс-релизы)": {
         "🏆 Nature": "https://www.nature.com/nature.rss",
@@ -355,7 +374,7 @@ BATCH_SYSTEM_PROMPT = """
 ]
 """
 
-def fetch_single_feed(feed_name, feed_url, items_per_feed):
+def fetch_single_feed(feed_name, feed_url, items_per_feed, known_urls):
     articles = []
     status = "ok"
     err = ""
@@ -365,9 +384,12 @@ def fetch_single_feed(feed_name, feed_url, items_per_feed):
             parsed = feedparser.parse(response.read())
             if parsed.entries:
                 for entry in parsed.entries[:items_per_feed]:
+                    link = entry.get("link", "").strip()
+                    # СВЕРКА: ЕСЛИ СТАТЬЯ УЖЕ ЕСТЬ В GOOGLE ТАБЛИЦЕ — ПРОПУСКАЕМ!
+                    if link in known_urls:
+                        continue
                     title = entry.get("title", "").replace("\n", " ").strip()
                     summary = re.sub(r'<[^>]+>', '', entry.get("summary", entry.get("description", ""))).replace("\n", " ").strip()
-                    link = entry.get("link", "")
                     articles.append({"source": feed_name, "title": title, "summary": summary[:1200], "link": link})
             else:
                 status = "empty"
@@ -541,10 +563,10 @@ with st.sidebar:
 # ==========================================
 tab_live, tab_farm, tab_history = st.tabs(["🔭 Свежий Радар", "🏭 Контент-Ферма (iXBT Studio)", "📊 Вечный архив (Google Таблица)"])
 
-# ----------------- ВКЛАДКА 1: РАДАР -----------------
+# ----------------- ВКЛАДКА 1: РАДАР (С ДЕДУПЛИКАЦИЕЙ ПО GOOGLE ТАБЛИЦЕ) -----------------
 with tab_live:
     st.title("🔭 Свежий Sci-Radar")
-    st.caption("Поиск свежих открытий ➔ Анализ через Gemini 3.6 Flash ➔ Сохранение в Google Таблицу")
+    st.caption("Сверка с Google Таблицей ➔ Анализ новых статей через Gemini 3.6 Flash ➔ Сохранение в архив")
 
     if not radar_keys:
         st.warning("⚠️ Добавьте ключи `RADAR_API_KEYS` в Secrets приложения!")
@@ -554,9 +576,12 @@ with tab_live:
         all_articles = []
         feed_reports = []
         
-        with st.spinner("Опрос выбранных научных журналов..."):
+        # Получаем полный список всех когда-либо просканированных ссылок
+        known_urls = get_all_scanned_urls()
+        
+        with st.spinner("Опрос выбранных научных журналов и сверка с архивом..."):
             with ThreadPoolExecutor(max_workers=15) as ex:
-                futures = [ex.submit(fetch_single_feed, name, active_feeds[name], items_per_feed) for name in active_feeds.keys()]
+                futures = [ex.submit(fetch_single_feed, name, active_feeds[name], items_per_feed, known_urls) for name in active_feeds.keys()]
                 for f in as_completed(futures):
                     res = f.result()
                     feed_reports.append(res)
@@ -571,9 +596,9 @@ with tab_live:
         st.session_state["feed_diag"] = {"ok": ok_feeds, "failed": failed_feeds}
 
         if not unique:
-            st.warning("Все свежие статьи уже обработаны!")
+            st.warning("🎉 Все статьи из выбранных журналов уже есть в вашей Google Таблице! Новых публикаций пока нет.")
         else:
-            st.write(f"Найдено **{len(unique)}** новых статей. Анализируем через **{selected_model}** (Ключи Радара)...")
+            st.write(f"Найдено **{len(unique)}** новых уникальных статей. Анализируем через **{selected_model}**...")
             results, pbar, key_idx = [], st.progress(0), 0
             batches = [unique[i:i+5] for i in range(0, len(unique), 5)]
             for b_i, batch in enumerate(batches):
@@ -589,8 +614,15 @@ with tab_live:
 
             sorted_res = sorted(results, key=lambda x: x.get("score", 0), reverse=True)
             st.session_state["latest_results"] = sorted_res
+            
+            # Сохраняем в кэш сессии и отправляем в Google Таблицу
+            if "session_scanned_urls" not in st.session_state:
+                st.session_state["session_scanned_urls"] = set()
+            for r in sorted_res:
+                st.session_state["session_scanned_urls"].add(r.get("link", "").strip())
+                
             sync_to_gsheets(sorted_res)
-            st.success(f"Готово! Обработано {len(sorted_res)} тем и записано в Google Таблицу.")
+            st.success(f"Готово! Обработано {len(sorted_res)} новых тем и записано в Google Таблицу.")
 
     if "feed_diag" in st.session_state:
         diag = st.session_state["feed_diag"]
@@ -623,13 +655,19 @@ with tab_farm:
 
     farm_mode = st.radio(
         "Выберите режим работы:",
-        ["⚡ Автопилот (Взять Топ-1 тему из базы)", "🔗 Написать по моей ссылке"],
+        [
+            "⚡ Автопилот (Взять Топ-1 тему из базы)", 
+            "🔗 Написать по моей ссылке",
+            "📄 Загрузить PDF вручную с устройства"
+        ],
         horizontal=True
     )
 
     target_url = ""
     target_title = ""
     target_summary = ""
+    uploaded_pdf_bytes = None
+    source_label = ""
 
     if farm_mode == "⚡ Автопилот (Взять Топ-1 тему из базы)":
         top_candidate = None
@@ -646,20 +684,42 @@ with tab_farm:
             target_url = top_candidate.get('link')
             target_title = top_candidate.get('title')
             target_summary = top_candidate.get('ru_tldr', '')
+            source_label = "Авто-выбор из базы"
         else:
-            st.warning("В базе пока нет тем. Сначала запустите сканирование во вкладке '🔭 Свежий Радар' или вставьте ссылку вручную.")
-    else:
+            st.warning("В базе пока нет тем. Сначала запустите сканирование во вкладке '🔭 Свежий Радар' или переключитесь на ручной ввод.")
+    elif farm_mode == "🔗 Написать по моей ссылке":
         target_url = st.text_input("Вставьте ссылку на исследование (Nature, arXiv, DOI или новость СМИ):", placeholder="https://www.nature.com/articles/s41567-...")
         target_title = "Научное исследование"
         target_summary = ""
+        source_label = "Ссылка из интернета"
+    else:
+        uploaded_file = st.file_uploader(
+            "Загрузите PDF файл исследования (любая закрытая статья с вашего ПК/телефона):", 
+            type=["pdf"],
+            help="Нейросеть прочитает весь документ от корки до корки, включая графики и таблицы!"
+        )
+        if uploaded_file is not None:
+            uploaded_pdf_bytes = uploaded_file.read()
+            target_title = uploaded_file.name.replace(".pdf", "").replace("_", " ")
+            target_url = "Локальный PDF файл пользователя"
+            source_label = f"Загруженный вручную PDF ({uploaded_file.name}, {len(uploaded_pdf_bytes)//1024} КБ)"
+            st.success(f"✅ Файл готов к анализу: **{uploaded_file.name}** ({len(uploaded_pdf_bytes)//1024} КБ)")
 
-    if st.button("🚀 Сгенерировать статью для iXBT Live", type="primary", disabled=(not target_url)):
+    can_generate = bool(target_url or uploaded_pdf_bytes)
+
+    if st.button("🚀 Сгенерировать статью для iXBT Live", type="primary", disabled=not can_generate):
         st.markdown("---")
         progress_bar = st.progress(0)
         status_text = st.empty()
 
-        status_text.write("🌐 **[0/8] Загружаем оригинальный PDF / материалы статьи...**")
-        payload, payload_type = get_paper_payload(target_url, target_title, target_summary)
+        if uploaded_pdf_bytes:
+            status_text.write(f"📄 **[0/8] Загружаем ваш PDF напрямую в {selected_model}...**")
+            payload = {"mime_type": "application/pdf", "data": uploaded_pdf_bytes}
+            payload_type = source_label
+        else:
+            status_text.write("🌐 **[0/8] Загружаем оригинальный PDF / материалы статьи...**")
+            payload, payload_type = get_paper_payload(target_url, target_title, target_summary)
+            
         progress_bar.progress(10)
 
         current_k_idx = 0
@@ -673,7 +733,7 @@ with tab_farm:
             progress_bar.progress(25)
             time.sleep(2)
 
-            status_text.write("🔹 **[2/8] Черновик статьи (Научный обозреватель + фактура)...**")
+            status_text.write(f"🔹 **[2/8] Черновик статьи (Научный обозреватель + анализ: {payload_type})...**")
             _, chat, current_k_idx = safe_send_step(chat, farm_keys, selected_model, current_k_idx, [payload, PROMPT_2_REVIEWER])
             progress_bar.progress(40)
             time.sleep(2)
@@ -712,11 +772,10 @@ with tab_farm:
             reve_prompts = r8.text.strip()
             progress_bar.progress(100)
 
-            status_text.success(f"🎉 СТАТЬЯ УСПЕШНО СОЗДАНА! (Объем: {len(article_text)} знаков | Модель: {selected_model})")
+            status_text.success(f"🎉 СТАТЬЯ УСПЕШНО СОЗДАНА! (Объем: {len(article_text)} знаков | Источник: {payload_type})")
 
             article_ixbt_html = md_to_ixbt_html(article_text)
 
-            # HTML со 100% рабочим двойным скриптом копирования для файлов и браузера
             html_ready = f"""<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -747,7 +806,6 @@ with tab_farm:
             const articleEl = document.getElementById('ixbt-article-content');
             if (!articleEl) return;
 
-            // 1. Метод Selection API (100% работает в локальных HTML-файлах file://)
             try {{
                 const range = document.createRange();
                 range.selectNodeContents(articleEl);
@@ -760,7 +818,6 @@ with tab_farm:
                 return;
             }} catch(e) {{}}
 
-            // 2. Метод Clipboard API
             if (navigator.clipboard) {{
                 const blobHtml = new Blob([articleEl.innerHTML], {{ type: 'text/html' }});
                 const blobText = new Blob([articleEl.innerText], {{ type: 'text/plain' }});
