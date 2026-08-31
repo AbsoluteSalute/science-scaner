@@ -298,16 +298,19 @@ def get_all_scanned_urls():
         known.update(st.session_state["session_scanned_urls"])
     return known
 
+# ==========================================
+# 100% РАБОЧАЯ БАЗА НАУЧНЫХ ЖУРНАЛОВ (ОБНОВЛЕННЫЕ АДРЕСА)
+# ==========================================
 SCIENCE_DATABASE = {
     "🏛️ Топ-журналы (Nature & Пресс-релизы)": {
         "🏆 Nature": "https://www.nature.com/nature.rss",
         "🏆 Nature Communications": "https://www.nature.com/ncomms.rss",
         "🌐 Scientific Reports": "https://www.nature.com/srep.rss",
-        "📢 EurekAlert! Science News": "https://www.eurekalert.org/rss/technology_engineering.xml"
+        "📢 EurekAlert! Science News": "https://www.eurekalert.org/rss.xml"
     },
     "🦖 Динозавры, Палеонтология и Древности": {
         "🦖 Динозавры (Phys.org)": "https://phys.org/rss-feed/earth-news/archaeology-fossils/",
-        "🦴 Окаменелости (ScienceDaily)": "https://www.sciencedaily.com/rss/plants_animals/fossils.xml",
+        "🦴 Окаменелости (ScienceDaily)": "https://www.sciencedaily.com/rss/fossils_ruins.xml",
         "🌿 Nature Ecology & Evolution": "https://www.nature.com/natecolevol.rss"
     },
     "🌋 Геология, Недра, Вулканы и Океаны": {
@@ -334,7 +337,7 @@ SCIENCE_DATABASE = {
     "⚡ Новые материалы и Энергия": {
         "🔋 Nature Energy": "https://www.nature.com/nenergy.rss",
         "🧪 Nature Chemistry": "https://www.nature.com/nchem.rss",
-        "⚡ Материаловедение (Phys.org)": "https://phys.org/rss-feed/materials-science/"
+        "⚡ Материаловедение (Phys.org)": "https://phys.org/rss-feed/physics-news/materials/"
     },
     "🤖 Роботы и AI": {
         "🏛️ MIT Research News": "https://news.mit.edu/rss/topic/research",
@@ -371,7 +374,8 @@ def fetch_single_feed(feed_name, feed_url, items_per_feed, known_urls):
     err = ""
     try:
         req = urllib.request.Request(feed_url, headers=HEADERS)
-        with urllib.request.urlopen(req, context=SSL_CTX, timeout=6) as response:
+        # Тайм-аут увеличен до 12 секунд для медленных ответов arXiv API
+        with urllib.request.urlopen(req, context=SSL_CTX, timeout=12) as response:
             parsed = feedparser.parse(response.read())
             if parsed.entries:
                 for entry in parsed.entries[:items_per_feed]:
@@ -498,7 +502,7 @@ def safe_send_step(chat, keys, model_name, key_idx, msg):
     raise Exception("Все ключи фермы исчерпали квоту.")
 
 # ==========================================
-# САЙДБАР
+# САЙДБАР (УПРАВЛЕНИЕ)
 # ==========================================
 radar_keys = get_radar_keys()
 farm_keys = get_farm_keys()
@@ -538,7 +542,7 @@ with st.sidebar:
                     active_feeds[f_n] = f_url
 
     st.info(f"🎯 **Выбрано журналов:** `{len(active_feeds)}`")
-    items_per_feed = st.slider("Статей с каждого журнала", 1, 5, 2)
+    items_per_feed = st.slider("Статей с каждого журнала", 1, 5, 3)
     min_score = st.slider("Показывать от оценки", 1, 10, 6)
 
     st.markdown("---")
@@ -762,7 +766,6 @@ with tab_farm:
 
             article_ixbt_html = md_to_ixbt_html(article_text)
 
-            # HTML со специальным iOS/Safari механизмом копирования
             html_ready = f"""<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -795,12 +798,10 @@ with tab_farm:
         #ixbt-article-content {{ -webkit-user-select: text; user-select: text; }}
     </style>
     <script>
-        // Универсальное копирование для iPhone / Safari / Android / ПК
         function copyFormattedForIXBT() {{
             const el = document.getElementById('ixbt-article-content');
             if (!el) return;
 
-            // iOS contentEditable активация
             el.setAttribute('contenteditable', 'true');
             el.focus();
             
@@ -821,12 +822,10 @@ with tab_farm:
                 sel.removeAllRanges();
                 showBtnSuccess('btn-copy-main', '✅ СКОПИРОВАНО ДЛЯ iXBT!');
             }} else {{
-                // Если Safari заблокировал фоновое копирование, оставляем выделение
                 alert('📱 Текст статьи выделен! Нажмите «Скопировать» в появившемся меню iPhone.');
             }}
         }}
 
-        // Резервная кнопка для ручного выделения на iPhone
         function selectForIphone() {{
             const el = document.getElementById('ixbt-article-content');
             if (!el) return;
