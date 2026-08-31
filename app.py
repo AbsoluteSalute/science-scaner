@@ -45,7 +45,7 @@ if not st.session_state["authenticated"]:
     st.stop()
 
 # ==========================================
-# КОНФИГУРАЦИЯ И СЕЙФ SECRETS (РАЗДЕЛЬНЫЕ ПУЛЫ)
+# КОНФИГУРАЦИЯ И СЕЙФ SECRETS
 # ==========================================
 DB_PATH = "radar_history.db"
 PDF_DIR = "pdf_downloads"
@@ -99,7 +99,7 @@ EDITORIAL RULES (STRICT):
 - NO Clichés: Ban phrases like "Time will tell," "Science does not stand still."
 - NO Passive Voice Abuse: Use active verbs.
 - NO Fluff: Cut introductory nonsense like "In today's world..."
-- Structure: Always use engaging Hooks, meaningful Subheadings, and a thought-provoking Outro.
+- Structure: Always use engaging Hooks (intros), meaningful Subheadings, and a thought-provoking Outro.
 
 PROCESS:
 1. Analyze the core conflict or breakthrough in the source material.
@@ -159,6 +159,98 @@ PROMPT_7_FIGURES = "какие изображения из исследован�
 PROMPT_8_REVE = "придумай детальный и понятный для генератора промт для создания иллюстраций к этой статье. генерировать будет reve. Промты на английском, рядом перевод на русский. С фотореализмом"
 
 # ==========================================
+# ЧИСТЫЙ КОНВЕРТЕР РАЗМЕТКИ ДЛЯ iXBT LIVE
+# ==========================================
+
+def format_inline(text):
+    text = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', text)
+    text = re.sub(r'__(.*?)__', r'<strong>\1</strong>', text)
+    text = re.sub(r'\*(.*?)\*', r'<em>\1</em>', text)
+    text = re.sub(r'_(.*?)_', r'<em>\1</em>', text)
+    text = re.sub(r'`(.*?)`', r'<code>\1</code>', text)
+    return text
+
+def md_to_ixbt_html(md_text):
+    """Преобразует Markdown в чистую верстку HTML со списками и цитатами без мусора"""
+    lines = md_text.split('\n')
+    html_lines = []
+    in_ul = False
+    in_ol = False
+    in_blockquote = False
+    
+    for line in lines:
+        stripped = line.strip()
+        
+        if not stripped:
+            if in_ul: html_lines.append("</ul>"); in_ul = False
+            if in_ol: html_lines.append("</ol>"); in_ol = False
+            if in_blockquote: html_lines.append("</blockquote>"); in_blockquote = False
+            continue
+            
+        # Заголовки (h3 и h2 для редактора)
+        if stripped.startswith('### '):
+            if in_ul: html_lines.append("</ul>"); in_ul = False
+            if in_ol: html_lines.append("</ol>"); in_ol = False
+            html_lines.append(f"<h3>{format_inline(stripped[4:])}</h3>")
+            continue
+        elif stripped.startswith('## '):
+            if in_ul: html_lines.append("</ul>"); in_ul = False
+            if in_ol: html_lines.append("</ol>"); in_ol = False
+            html_lines.append(f"<h2>{format_inline(stripped[3:])}</h2>")
+            continue
+        elif stripped.startswith('# '):
+            if in_ul: html_lines.append("</ul>"); in_ul = False
+            if in_ol: html_lines.append("</ol>"); in_ol = False
+            html_lines.append(f"<h2>{format_inline(stripped[2:])}</h2>")
+            continue
+            
+        # Цитаты / Врезки
+        if stripped.startswith('> '):
+            if not in_blockquote:
+                html_lines.append("<blockquote>")
+                in_blockquote = True
+            html_lines.append(f"<p>{format_inline(stripped[2:])}</p>")
+            continue
+        elif in_blockquote:
+            html_lines.append("</blockquote>")
+            in_blockquote = False
+            
+        # Маркированные списки (*, -, •)
+        ul_match = re.match(r'^[\*\-\•]\s+(.*)$', stripped)
+        if ul_match:
+            if not in_ul:
+                if in_ol: html_lines.append("</ol>"); in_ol = False
+                html_lines.append("<ul>")
+                in_ul = True
+            html_lines.append(f"<li>{format_inline(ul_match.group(1))}</li>")
+            continue
+            
+        # Нумерованные списки
+        ol_match = re.match(r'^\d+[\.\)]\s+(.*)$', stripped)
+        if ol_match:
+            if not in_ol:
+                if in_ul: html_lines.append("</ul>"); in_ul = False
+                html_lines.append("<ol>")
+                in_ol = True
+            html_lines.append(f"<li>{format_inline(ol_match.group(1))}</li>")
+            continue
+            
+        if in_ul: html_lines.append("</ul>"); in_ul = False
+        if in_ol: html_lines.append("</ol>"); in_ol = False
+        
+        if stripped in ['---', '***', '___']:
+            html_lines.append("<hr>")
+            continue
+            
+        html_lines.append(f"<p>{format_inline(stripped)}</p>")
+        
+    if in_ul: html_lines.append("</ul>")
+    if in_ol: html_lines.append("</ol>")
+    if in_blockquote: html_lines.append("</blockquote>")
+    
+    return "\n".join(html_lines)
+
+# ==========================================
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 # ==========================================
 
@@ -201,9 +293,6 @@ def fetch_from_gsheets():
     except:
         return []
 
-# ==========================================
-# ПОЛНАЯ БАЗА НАУЧНЫХ ЖУРНАЛОВ
-# ==========================================
 SCIENCE_DATABASE = {
     "🏛️ Топ-журналы (Nature & Пресс-релизы)": {
         "🏆 Nature": "https://www.nature.com/nature.rss",
@@ -378,19 +467,7 @@ def get_paper_payload(url, fallback_title="", fallback_summary=""):
 
     return f"TITLE: {fallback_title}\n\nSUMMARY:\n{fallback_summary}\n\nURL: {url}", "Подробный научный контекст"
 
-def md_to_html(md):
-    h = re.sub(r'^###\s*(.*?)$', r'<h3>\1</h3>', md, flags=re.M)
-    h = re.sub(r'^##\s*(.*?)$', r'<h2>\1</h2>', h, flags=re.M)
-    h = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', h)
-    h = re.sub(r'^>\s*(.*?)$', r'<blockquote>\1</blockquote>', h, flags=re.M)
-    return "\n".join([f"<p>{p.strip()}</p>" if p.strip() and not p.strip().startswith('<h') and not p.strip().startswith('<blockquote') else p.strip() for p in h.split('\n\n') if p.strip()])
-
-# ==========================================
-# БЕЗОПАСНАЯ ОТПРАВКА С РОТАЦИЕЙ (БЕЗ NONLOCAL)
-# ==========================================
-
 def safe_send_step(chat, keys, model_name, key_idx, msg):
-    """Безопасно выполняет шаг, а при ошибке квоты переносит память на следующий ключ"""
     for attempt in range(len(keys) * 2):
         try:
             resp = chat.send_message(msg)
@@ -409,7 +486,7 @@ def safe_send_step(chat, keys, model_name, key_idx, msg):
     raise Exception("Все ключи фермы исчерпали квоту.")
 
 # ==========================================
-# САЙДБАР (РАЗДЕЛЬНЫЕ СЧЕТЧИКИ КЛЮЧЕЙ)
+# САЙДБАР (УПРАВЛЕНИЕ)
 # ==========================================
 radar_keys = get_radar_keys()
 farm_keys = get_farm_keys()
@@ -461,7 +538,7 @@ with st.sidebar:
 # ==========================================
 # ОСНОВНЫЕ ВКЛАДКИ
 # ==========================================
-tab_live, tab_farm, tab_history = st.tabs(["🔭 Свежий Радар", "🏭 Контент-Ферма", "📊 Вечный архив (Google Таблица)"])
+tab_live, tab_farm, tab_history = st.tabs(["🔭 Свежий Радар", "🏭 Контент-Ферма (iXBT Studio)", "📊 Вечный архив (Google Таблица)"])
 
 # ----------------- ВКЛАДКА 1: РАДАР -----------------
 with tab_live:
@@ -519,15 +596,15 @@ with tab_live:
 
 # ----------------- ВКЛАДКА 2: ФЕРМА -----------------
 with tab_farm:
-    st.title("🏭 Облачная Контент-Ферма")
-    st.caption("Автоматическая 8-шаговая генерация лонгридов на Gemini 3.6 Flash (Выделенный пул ключей Фермы)")
+    st.title("🏭 Контент-Ферма (Студия iXBT Live)")
+    st.caption("8-шаговый пайплайн Ruby_Rougarou ➔ Форматирование в чистый HTML iXBT Live")
 
     if not farm_keys:
         st.warning("⚠️ Добавьте выделенные ключи `FARM_API_KEYS` в Secrets приложения!")
         st.stop()
 
     farm_mode = st.radio(
-        "Выберите режим работы фермы:",
+        "Выберите режим работы:",
         ["⚡ Автопилот (Взять Топ-1 тему из базы)", "🔗 Написать по моей ссылке"],
         horizontal=True
     )
@@ -552,13 +629,13 @@ with tab_farm:
             target_title = top_candidate.get('title')
             target_summary = top_candidate.get('ru_tldr', '')
         else:
-            st.warning("В базе пока нет тем. Сначала запустите сканирование во вкладке '🔭 Свежий Радар' или переключитесь на ручной ввод ссылки.")
+            st.warning("В базе пока нет тем. Сначала запустите сканирование во вкладке '🔭 Свежий Радар' или вставьте ссылку вручную.")
     else:
         target_url = st.text_input("Вставьте ссылку на исследование (Nature, arXiv, DOI или новость СМИ):", placeholder="https://www.nature.com/articles/s41567-...")
         target_title = "Научное исследование"
         target_summary = ""
 
-    if st.button("🚀 Сгенерировать готовую статью", type="primary", disabled=(not target_url)):
+    if st.button("🚀 Сгенерировать статью для iXBT Live", type="primary", disabled=(not target_url)):
         st.markdown("---")
         progress_bar = st.progress(0)
         status_text = st.empty()
@@ -629,31 +706,109 @@ with tab_farm:
 
             status_text.success(f"🎉 СТАТЬЯ УСПЕШНО СОЗДАНА! (Объем: {len(article_text)} знаков | Модель: {selected_model})")
 
-            # Сборка HTML
-            html_ready = f"""<!DOCTYPE html><html><head><meta charset='UTF-8'><title>{target_title}</title></head><body style='background:#0f172a; color:#f8fafc; font-family:sans-serif; padding:30px; line-height:1.7;'><div style='max-width:900px; margin:0 auto; background:#1e293b; padding:40px; border-radius:12px;'><h1>{target_title}</h1><div style='background:#090d16; padding:15px; border-radius:8px; border:1px dashed #38bdf8; margin:20px 0;'><strong>🎯 Заголовки Discover:</strong><pre>{final_titles}</pre></div><div style='background:#090d16; padding:15px; border-radius:8px; border:1px dashed #38bdf8; margin:20px 0;'><strong>🎨 Промпты для Reve:</strong><pre>{reve_prompts}</pre></div><div style='background:#090d16; padding:15px; border-radius:8px; border:1px dashed #38bdf8; margin:20px 0;'><strong>📊 Рисунки из PDF:</strong><pre>{figures_placement}</pre></div><hr style='border-color:#334155; margin:30px 0;'><div>{md_to_html(article_text)}</div></div></body></html>"""
+            # Чистый HTML без плейсхолдеров и лишних блоков
+            article_ixbt_html = md_to_ixbt_html(article_text)
+
+            html_ready = f"""<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>{target_title} | Ruby_Rougarou</title>
+    <style>
+        :root {{ --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --accent: #38bdf8; --border: #334155; }}
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); padding: 30px; line-height: 1.7; }}
+        .container {{ max-width: 950px; margin: 0 auto; background: var(--card); padding: 40px; border-radius: 14px; border: 1px solid var(--border); }}
+        h1 {{ color: #fff; font-size: 26px; line-height: 1.3; margin-bottom: 20px; }}
+        h2 {{ color: var(--accent); font-size: 22px; margin-top: 35px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }}
+        h3 {{ color: #7dd3fc; font-size: 18px; margin-top: 20px; }}
+        .box {{ background: #090d16; border: 1px dashed var(--accent); padding: 20px; border-radius: 10px; margin: 25px 0; }}
+        .box-t {{ color: var(--accent); font-weight: bold; font-size: 16px; margin-bottom: 10px; display: block; }}
+        .btn {{ background: var(--accent); color: #000; font-weight: bold; border: none; padding: 14px 24px; border-radius: 8px; cursor: pointer; font-size: 15px; display: inline-block; margin-bottom: 20px; }}
+        .btn:hover {{ opacity: 0.9; }}
+        pre {{ white-space: pre-wrap; font-family: inherit; margin: 0; }}
+        
+        ul, ol {{ margin: 16px 0 20px 24px; padding-left: 10px; }}
+        li {{ margin-bottom: 8px; line-height: 1.6; }}
+        ul li {{ list-style-type: disc; }}
+        ol li {{ list-style-type: decimal; }}
+        blockquote {{ background: #0f2744; border-left: 4px solid var(--accent); margin: 20px 0; padding: 14px 20px; border-radius: 6px; font-style: italic; }}
+        p {{ margin-bottom: 16px; }}
+    </style>
+    <script>
+        function copyFormattedForIXBT() {{
+            const articleEl = document.getElementById('ixbt-article-content');
+            const type = 'text/html';
+            const plainText = articleEl.innerText;
+            const htmlText = articleEl.innerHTML;
+            
+            const blobHtml = new Blob([htmlText], {{ type: 'text/html' }});
+            const blobText = new Blob([plainText], {{ type: 'text/plain' }});
+            
+            const data = [new ClipboardItem({{ 'text/html': blobHtml, 'text/plain': blobText }})];
+            
+            navigator.clipboard.write(data).then(() => {{
+                alert('✅ Статья скопирована с полным форматированием! Просто нажмите Ctrl+V в редакторе iXBT Live.');
+            }}).catch(() => {{
+                navigator.clipboard.writeText(plainText).then(() => alert('Скопировано как текст!'));
+            }});
+        }}
+    </script>
+</head>
+<body>
+    <div class="container">
+        <button class="btn" onclick="copyFormattedForIXBT()">📋 Скопировать форматированную статью для iXBT Live (Ctrl+V)</button>
+        <div style="color: #94a3b8; font-size: 14px; margin-bottom: 25px;">Автор: <strong>Ruby_Rougarou</strong> | Модель: <strong>{selected_model}</strong> | Объем: <strong>{len(article_text)} знаков</strong></div>
+
+        <!-- ШПАРАГАЛКА 1: ЗАГОЛОВКИ -->
+        <div class="box">
+            <span class="box-t">🎯 Заголовки Google Discover:</span>
+            <pre>{final_titles}</pre>
+        </div>
+
+        <!-- ШПАРАГАЛКА 2: ПРОМПТЫ ДЛЯ REVE -->
+        <div class="box">
+            <span class="box-t">🎨 Промпты для генератора Reve (EN + RU, Фотореализм):</span>
+            <pre>{reve_prompts}</pre>
+        </div>
+
+        <!-- ШПАРАГАЛКА 3: РИСУНКИ ИЗ PDF -->
+        <div class="box">
+            <span class="box-t">📊 Графики из исследования (где и какие брать):</span>
+            <pre>{figures_placement}</pre>
+        </div>
+
+        <hr style="border-color: var(--border); margin: 35px 0;">
+
+        <!-- ТОЛЬКО ЧИСТЫЙ ТЕКСТ СТАТЬИ ДЛЯ ВСТАВКИ -->
+        <div id="ixbt-article-content">
+            {article_ixbt_html}
+        </div>
+    </div>
+</body>
+</html>"""
 
             st.download_button(
                 label="📥 Скачать готовую статью в HTML",
                 data=html_ready,
-                file_name=f"ready_article_{datetime.now().strftime('%Y%m%d_%H%M')}.html",
+                file_name=f"ixbt_article_{datetime.now().strftime('%Y%m%d_%H%M')}.html",
                 mime="text/html",
                 type="primary"
             )
 
-            # Вывод на экран
+            # Вывод на страницу
             c1, c2 = st.columns(2)
             with c1:
                 st.subheader("🎯 Заголовки Google Discover")
-                st.text_area("Варианты названий:", value=final_titles, height=180)
+                st.text_area("Названия:", value=final_titles, height=160)
             with c2:
                 st.subheader("🎨 Промпты для Reve (EN + RU)")
-                st.text_area("Иллюстрации:", value=reve_prompts, height=180)
+                st.text_area("Иллюстрации:", value=reve_prompts, height=160)
 
             st.subheader("📊 Рисунки из исследования")
             st.info(figures_placement)
 
             st.markdown("---")
-            st.subheader("📄 Текст статьи (Готово для iXBT)")
+            st.subheader("📄 Текст статьи (Готово для iXBT Live)")
             st.markdown(article_text)
 
         except Exception as e:
